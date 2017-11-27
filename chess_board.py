@@ -1,15 +1,13 @@
 import tkinter as tk
 import numpy as np
 import time
+import chess_rule as rule
 from tkinter import font
 from tkinter import messagebox
-
-class FiveStoneChess:
-    pass
+from player import Player
 
 BLACK = 'BLACK'
 WHITE = 'WHITE'
-HUMMAN = 'HUMMAN'
 
 class ChessBoard:
     def __init__(self):
@@ -62,7 +60,6 @@ class ChessBoard:
         self.window = window
         self.canvas = canvas
         self.lb = lb
-        self.rule = ChessRule()
         self.black_player = None
         self.white_player = None
         self.current_player = None
@@ -94,6 +91,11 @@ class ChessBoard:
         self.begin_timer()
         self.canvas.bind('<Button-1>', self.onclick)
         self.start_text.set('restart')
+        self.play()
+
+    def play(self):
+        if self.current_player.play(self.board()) is None:
+            pass
 
     def clear(self):
         if self.current_player:
@@ -168,6 +170,8 @@ class ChessBoard:
         if  not (self.w - self.r < x < self.w * 5 + self.r and self.w - self.r < y < self.w * 5 + self.r):
             self.lb.config(text='click at (%d,%d)' % (event.x, event.y))
             return
+        if not self.current_player.is_humman():
+            return
         posx = x / self.w - 0.5
         posy = y / self.w - 0.5
         # 整数部分
@@ -183,15 +187,15 @@ class ChessBoard:
             loc = self.pos_to_loc(x, y)
             if self.current_stone is None:
                 stone = self.stone(loc)
-                if stone and stone.player == self.current_player and stone.player.type_ == HUMMAN:
+                if stone and stone.player == self.current_player:
                     self.move_to_pos(stone, x, y)
                     self.begin_moving(stone)
             else:
                 self.end_moving(loc)
 
     def begin_moving(self, stone):
-        self.canvas.bind('<Motion>', self.onmotion)
         self.current_stone = stone
+        self.canvas.bind('<Motion>', self.onmotion)
 
     def end_moving(self, loc):
         if self.move_to(self.current_stone, loc):
@@ -205,27 +209,26 @@ class ChessBoard:
         :param to_loc:
         :return: True:终止移动，False:继续移动
         """
-        result,del_stone_loc = self.rule.move(self.board(), stone.loc, to_loc)
+        result,del_stone_loc = rule.move(self.board(), stone.loc, to_loc)
         print(result, del_stone_loc)
-        if result == NOT_MOVE:
+        if result == rule.NOT_MOVE:
             self.move_to_loc(self.current_stone, to_loc)
             return True
-        if result == INVALID_MOVE:
+        if result == rule.INVALID_MOVE:
             return False
-        if result == ACCQUIRE or result == WIN:
+        if result == rule.ACCQUIRE or result == rule.WIN:
             self.move_to_loc(self.current_stone, to_loc)
             if del_stone_loc:
                 for loc in del_stone_loc:
                     self.del_stone(self.stone(loc))
-            if result == ACCQUIRE:
+            if result == rule.ACCQUIRE:
                 self.switch_player()
-            elif result == WIN:
+            elif result == rule.WIN:
                 print('GAME OVER, WINNER IS', stone.player.name)
                 self.game_over(stone.player)
             return True
 
     def del_stone(self, stone):
-        print('delete:', stone.loc)
         self.canvas.delete(stone.oval)
         self.stone(stone.loc, None)
 
@@ -235,6 +238,7 @@ class ChessBoard:
         self.current_player = self.white_player if self.current_player is self.black_player else self.black_player
         self.show_signal()
         self.begin_timer()
+        self.play()
 
     def move_to_loc(self, stone, loc):
         self.stone(stone.loc, None)
@@ -262,117 +266,13 @@ class ChessBoard:
         if -1 < i < 5 and -1 < j < 5:
             return i,j
 
+    @staticmethod
+    def launch():
+        tk.mainloop()
+
 class Stone:
     def __init__(self, loc, oval, value, player=None):
         self.loc = loc
         self.oval = oval
         self.value = value
         self.player = player
-
-
-class Player:
-    def __init__(self, name, signal, winner_text, clock, type_=HUMMAN):
-        self.name = name
-        self.signal = signal
-        self.winner_text = winner_text
-        self.clock = clock
-        self.type_ = type_
-        self.begin_time = 0
-        self.total_time = 0
-
-    def play(self, board):
-        """
-        返回(位置,动作)
-        人类选手由界面操作，所以不执行任何动作
-        """
-        pass
-
-    def __str__(self):
-        return self.name + ':' + self.type_
-
-    def __repr__(self):
-        return str(self)
-
-NOT_MOVE = 'NOT_MOVE'
-INVALID_MOVE = 'INVALID_MOVE'
-ACCQUIRE = 'ACCQUIRE'
-WIN = 'WIN'
-class ChessRule:
-    def move(self, board, from_, to_):
-        """
-        判断from_处的棋子是否可以移动到to_位置
-        会直接修改board
-        :board: numpy数组，一方为1，另一方为-1，空白处为0
-        :return: command,[被吃的子]
-        """
-        print('move:', from_, to_)
-        dis = np.abs(np.subtract(from_, to_)).sum()
-        stone = board[from_]
-        if stone == 0:
-            raise ValueError(str(from_) + '处没有子')
-        if dis == 0:
-            # 未移动
-            return NOT_MOVE, None
-        if dis > 1 or board[to_] != 0:
-            # 移动距离大于1或目标位置有子，不允许移动
-            return INVALID_MOVE, None
-        # 允许移动
-        board[to_] = stone
-        board[from_] = 0
-        eat_stone = self.judge_eat(board, to_)
-        is_win = self.judge_win(board, player=stone)
-        return WIN if is_win else ACCQUIRE, eat_stone# 判断是否吃子
-
-    def judge_eat(self, board, loc):
-        """
-        判断是否会吃子
-        """
-        result = []
-        i, j = loc
-        # 当前选手的棋子
-        player = board[loc]
-        # 判断行上是否可以吃子
-        rs_row = self.judge_eat_line(board[i], player)
-        if rs_row is not None:
-            board[i, rs_row] = 0
-            result.append((i, rs_row))
-        # 判断列上是否可以吃子
-        rs_col = self.judge_eat_line(board[:,j], player)
-        if rs_col is not None:
-            board[rs_col,j] = 0
-            result.append((rs_col, j))
-        return result
-
-    @staticmethod
-    def judge_eat_line(line, player):
-        """
-        判断某条线上player是否存在吃子
-        :return: 被吃子的位置
-        """
-        # player棋子的位置
-        player_stone_index = np.argwhere(line == player).flatten()
-        # 对手棋子的位置
-        opponent_stone_index = np.argwhere(line == -player).flatten()
-        print('棋子位置：', player_stone_index, opponent_stone_index)
-        if len(player_stone_index) == 2 and \
-            player_stone_index[1] - player_stone_index[0] == 1 and \
-            len(opponent_stone_index) == 1 and \
-            (opponent_stone_index[0] == player_stone_index[0] - 1 or opponent_stone_index[0] == player_stone_index[1] + 1):
-            # player有两颗子且是连续的
-            # 对手有一颗子且与player的棋子连续
-            # 可以吃对手的子
-            return opponent_stone_index[0]
-
-    @staticmethod
-    def judge_win(board, player):
-        """
-        对方棋子数少于2则胜
-        """
-        num = np.abs(board[board==-player]).sum()
-        if num < 2:
-            return WIN
-
-
-ChessBoard()
-
-tk.mainloop()
