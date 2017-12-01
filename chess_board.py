@@ -1,13 +1,17 @@
 import tkinter as tk
 import numpy as np
 import time
+import threading
 import chess_rule as rule
 from tkinter import font
 from tkinter import messagebox
-from player import Player
+from player import HummaPlayer, PolicyNetworkPlayer
+from record import Record
 
 BLACK = 'BLACK'
 WHITE = 'WHITE'
+BLACK_VALUE = 1
+WHITE_VALUE = -1
 
 class ChessBoard:
     def __init__(self):
@@ -47,19 +51,34 @@ class ChessBoard:
         self.clock_white = canvas.create_text(w*6-40, 30, text='00:00', fill='#EEE', font=font.Font(family='Times', size=20))
         self.clock_black = canvas.create_text(w*6-40, w * 6 - 30, text='00:00', fill='#111', font=font.Font(family='Times', size=20))
 
-        start_text = tk.StringVar(window, value='start')
-        btn = tk.Button(window, textvariable=start_text, command=self.start)
-        btn.pack()
+        # 开始按扭
+        start_btn_text = tk.StringVar(window, value='start')
+        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=100, y=620)
+
+        # replay按扭
+        tk.Button(window, text='replay', command=self.replay).place(x=200, y=620)
+
+        # 速度调节按扭
+        tk.Button(window, text='faster', command=lambda:self.change_period(0.5)).place(x=300, y=620)
+        tk.Button(window, text='slower', command=lambda:self.change_period(2)).place(x=400, y=620)
+
+        # 暂停按扭
+        pause_text = tk.StringVar(value='pause')
+        tk.Button(window, textvariable=pause_text, command=self.pause, width=5).place(x=500, y=620)
+
+        # 消息显示
         lb = tk.Label(window, width=40)
-        lb.pack()
+        lb.place(x=85, y=650)
 
         self.w = w
         self.r = r
         self.row = row
         self.col = col
+        self.period = 1
         self.window = window
         self.canvas = canvas
-        self.lb = lb
+        self.pause_text = pause_text
+        self.text = lb
         self.black_player = None
         self.white_player = None
         self.current_player = None
@@ -67,17 +86,24 @@ class ChessBoard:
         self.timer = None
         self.winner = None
         self.ended = False
-        self.start_text = start_text
+        self.start_btn_text = start_btn_text
+        self.event = threading.Event()
+        self.record = Record('records/app/')    # 记录棋谱: board:from_:to_:del_num
+        self.record_path = ''
         self.init_stone()
 
     def start(self):
-        if self.start_text.get() == 'restart':
+        if self.start_btn_text.get() == 'restart':
             if not messagebox.askokcancel(title='请确认', message='确定取消当前棋局并重新开局？'):
                 return
         self.clear()
         self.init_stone()
-        black_player = Player(BLACK, self.sig_black, self.winner_black, self.clock_black)
-        white_player = Player(WHITE, self.sig_white, self.winner_white, self.clock_white)
+
+        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/policy_network2_082.model0')
+        black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
+
+        # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
+        # black_player = PolicyNetworkPlayer('PIG', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, modelfile='model/policy_network_005.model')
         for stone in self._stone[0]:
             stone.player = white_player
         for stone in self._stone[4]:
@@ -90,24 +116,35 @@ class ChessBoard:
         self.show_signal()
         self.begin_timer()
         self.canvas.bind('<Button-1>', self.onclick)
-        self.start_text.set('restart')
+        self.start_btn_text.set('restart')
         self.play()
 
+    def change_period(self, scale):
+        self.period *= scale
+        print(self.period)
+
     def play(self):
-        if self.current_player.play(self.board()) is None:
-            pass
+        print(self.current_player, ' play...')
+        if self.current_player.is_humman():
+            return
+        from_,to_ = self.current_player.play(self.board())
+        stone = self.stone(from_)
+        result = self.move_to(stone, to_)
+        if result == rule.ACCQUIRE:
+            self.switch_player_and_play()
+        elif result == rule.WIN:
+            print('GAME OVER, WINNER IS', stone.player.name)
+            self.game_over(stone.player)
 
     def clear(self):
-        if self.current_player:
-            self.hide_signal()
-        if self.timer:
-            self.cancel_timer()
         for board_row in self._stone:
             for s in board_row:
                 if s is not None:
                     self.del_stone(s)
-        if self.winner:
-            self.hide_winner()
+        if self.timer:
+            self.cancel_timer()
+        self.hide_signal()
+        self.hide_winner()
         self.black_player = None
         self.white_player = None
         self.current_player = None
@@ -118,8 +155,8 @@ class ChessBoard:
 
     def init_stone(self):
         stone, canvas, w, r, row, col = self._stone, self.canvas, self.w, self.r, self.row, self.col
-        white = [Stone((0, j), canvas.create_oval(w * (j + 1) - r, w - r, w * (j + 1) + r, w + r, fill='#EEE', outline='#EEE'), value=-1) for j in range(col)]
-        black = [Stone((4, j), canvas.create_oval(w * (j + 1) - r, w * row - r, w * (j + 1) + r, w * row + r, fill='#111', outline='#111'), value=1) for j in range(col)]
+        white = [Stone((0, j), canvas.create_oval(w * (j + 1) - r, w - r, w * (j + 1) + r, w + r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE) for j in range(col)]
+        black = [Stone((4, j), canvas.create_oval(w * (j + 1) - r, w * row - r, w * (j + 1) + r, w * row + r, fill='#111', outline='#111'), value=BLACK_VALUE) for j in range(col)]
         stone[0] = white
         stone[row - 1] = black
 
@@ -127,13 +164,15 @@ class ChessBoard:
         self.canvas.itemconfigure(self.current_player.signal, state=tk.NORMAL)
 
     def hide_signal(self):
-        self.canvas.itemconfigure(self.current_player.signal, state=tk.HIDDEN)
+        self.canvas.itemconfigure(self.sig_white, state=tk.HIDDEN)
+        self.canvas.itemconfigure(self.sig_black, state=tk.HIDDEN)
 
     def show_winner(self):
         self.canvas.itemconfigure(self.winner.winner_text, state=tk.NORMAL)
 
     def hide_winner(self):
-        self.canvas.itemconfigure(self.winner.winner_text, state=tk.HIDDEN)
+        self.canvas.itemconfigure(self.winner_white, state=tk.HIDDEN)
+        self.canvas.itemconfigure(self.winner_black, state=tk.HIDDEN)
 
     def begin_timer(self):
         self.current_player.begin_time = int(time.time())
@@ -149,26 +188,28 @@ class ChessBoard:
         self.canvas.itemconfigure(self.current_player.clock, text='00:00')
 
     def game_over(self, winner):
-        self.lb.config(text='winner is: ' + str(winner))
+        # self.lb.config(text='winner is: ' + str(winner))
         self.winner = winner
         self.ended = True
         self.canvas.unbind('<Button-1>')
         self.cancel_timer()
         self.hide_signal()
         self.show_winner()
-        self.start_text.set('start')
+        self.start_btn_text.set('start')
+        self.record_path = self.record.save()
+        self.record.clear()
 
     def board(self):
         return np.array([[0 if s is None else s.value for s in row] for row in self._stone])
 
     def onmotion(self, event):
-        self.lb.config(text='position is (%d,%d)' % (event.x, event.y))
+        self.text.config(text='position is (%d,%d)' % (event.x, event.y))
         self.move_to_pos(self.current_stone, event.x, event.y)
 
     def onclick(self, event):
         x,y = event.x, event.y
         if  not (self.w - self.r < x < self.w * 5 + self.r and self.w - self.r < y < self.w * 5 + self.r):
-            self.lb.config(text='click at (%d,%d)' % (event.x, event.y))
+            self.text.config(text='click at (%d,%d)' % (event.x, event.y))
             return
         if not self.current_player.is_humman():
             return
@@ -181,7 +222,7 @@ class ChessBoard:
         posx_d = posx - posx_i
         posy_d = posy - posy_i
 
-        self.lb.config(text='click at (%d,%d) position is %d,%d' % (event.x, event.y, posx_i, posy_i))
+        self.text.config(text='click at (%d,%d) position is %d,%d' % (event.x, event.y, posx_i, posy_i))
 
         if 0.25 < posx_d < 0.75 and 0.25 < posy_d < 0.75:
             loc = self.pos_to_loc(x, y)
@@ -198,9 +239,21 @@ class ChessBoard:
         self.canvas.bind('<Motion>', self.onmotion)
 
     def end_moving(self, loc):
-        if self.move_to(self.current_stone, loc):
-            self.canvas.unbind('<Motion>')
-            self.current_stone = None
+        stone = self.current_stone
+        result = self.move_to(stone, loc)
+        if result == rule.INVALID_MOVE:
+            return False
+        self.canvas.unbind('<Motion>')
+        self.current_stone = None
+
+        if result == rule.NOT_MOVE:
+            self.move_to_loc(stone, loc)
+
+        if result == rule.ACCQUIRE:
+            self.switch_player_and_play()
+        elif result == rule.WIN:
+            print('GAME OVER, WINNER IS', stone.player.name)
+            self.game_over(stone.player)
 
     def move_to(self, stone, to_loc):
         """
@@ -209,24 +262,59 @@ class ChessBoard:
         :param to_loc:
         :return: True:终止移动，False:继续移动
         """
+        old_board = self.board()
+        from_ = stone.loc
         result,del_stone_loc = rule.move(self.board(), stone.loc, to_loc)
         print(result, del_stone_loc)
-        if result == rule.NOT_MOVE:
-            self.move_to_loc(self.current_stone, to_loc)
-            return True
-        if result == rule.INVALID_MOVE:
-            return False
         if result == rule.ACCQUIRE or result == rule.WIN:
-            self.move_to_loc(self.current_stone, to_loc)
-            if del_stone_loc:
-                for loc in del_stone_loc:
-                    self.del_stone(self.stone(loc))
-            if result == rule.ACCQUIRE:
-                self.switch_player()
-            elif result == rule.WIN:
-                print('GAME OVER, WINNER IS', stone.player.name)
-                self.game_over(stone.player)
-            return True
+            self.move_to_loc(stone, to_loc)
+            for loc in del_stone_loc:
+                self.del_stone(self.stone(loc))
+            print(from_, to_loc)
+            action = rule.actions_move.index(tuple(np.subtract(to_loc, from_)))
+            print(action)
+            self.record.add(old_board, from_, action, len(del_stone_loc), win=(result==rule.WIN))
+        return result
+
+    def replay(self):
+        recordpath = 'records/train/1512130266665156.record'
+        if self.record_path:
+            recordpath = self.record_path
+        self.clear()
+        self.init_stone()
+        self.event.set()
+        record = Record()
+        record.read(recordpath)
+        record_iter = iter(record)
+        length = record.length()
+        record.n = 1
+        def play_next_step():
+            self.event.wait()
+            board, from_, action, reward = next(record_iter)
+            if not (board == self.board()).all():
+                print(board)
+                print('-' * 50)
+                print(self.board())
+                raise ValueError
+            player = board[from_]
+            to_ = tuple(np.add(from_, rule.actions_move[action]))
+            result = self.move_to(self.stone(from_), to_)
+            if result == rule.WIN:
+                winner_text = self.winner_black if player==1 else self.winner_white
+                self.canvas.itemconfigure(winner_text, state=tk.NORMAL)
+            self.text.config(text=str(length) + ':' + str(record.n) + ',reward: ' + str(reward))
+            record.n += 1
+            threading.Timer(self.period, play_next_step).start()
+            # self.window.after(self.period * 1000, play_next_step)
+        threading.Timer(self.period, play_next_step).start()
+
+    def pause(self):
+        if self.pause_text.get() == 'pause':
+            self.event.clear()
+            self.pause_text.set('resume')
+        else:
+            self.event.set()
+            self.pause_text.set('pause')
 
     def del_stone(self, stone):
         self.canvas.delete(stone.oval)
@@ -238,6 +326,9 @@ class ChessBoard:
         self.current_player = self.white_player if self.current_player is self.black_player else self.black_player
         self.show_signal()
         self.begin_timer()
+
+    def switch_player_and_play(self):
+        self.switch_player()
         self.play()
 
     def move_to_loc(self, stone, loc):

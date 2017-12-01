@@ -34,8 +34,12 @@ def _move(board, from_, to_):
     stone = board[from_]
     board[to_] = stone
     board[from_] = 0
+    is_win = judge_win_2(board, player=stone)
+    if is_win:
+        return WIN, []
     eat_stone = judge_eat(board, to_)
-    is_win = judge_win(board, player=stone)
+    if len(eat_stone) > 0:
+        is_win = judge_win_1(board, player=stone)
     return WIN if is_win else ACCQUIRE, eat_stone  # 判断是否吃子
 
 def judge_eat(board, loc):
@@ -78,11 +82,18 @@ def judge_eat_line(line, player):
         # 可以吃对手的子
         return opponent_stone_index[0]
 
-def judge_win(board, player):
+def judge_win_1(board, player):
     """
     对方棋子数少于2则胜
     """
     if (board==-player).sum() < 2:
+        return WIN
+
+def judge_win_2(board, player):
+    """
+    对方无路可走则胜
+    """
+    if valid_location(board, -player).sum() == 0:
         return WIN
 
 def feature(board, player):
@@ -124,17 +135,21 @@ def valid_location(board, player):
     return locations
 
 def neighbor(location):
-    diffs = [(-1,0), (1,0), (0,-1), (0,1)]
-    return map(lambda loc: tuple(loc), filter(lambda loc: np.all(loc>=0) and np.all(loc<=4), map(lambda diff: np.add(location,diff), diffs)))
+    return map(lambda loc: tuple(loc), filter(lambda loc: np.all(loc>=0) and np.all(loc<=4), map(lambda action: np.add(location,action), actions_move)))
 
 
-if __name__ == '__main__':
-    bd = np.zeros((5,5))
-    bd[0,:] = -1
-    bd[4,:] = 1
-    bd[3,2] = 1
+def _main():
+    bd = np.zeros((5, 5))
+    bd[0, :] = -1
+    bd[4, 0] = 1
+    bd[4, 2] = 1
+    bd[3, 2] = 1
     print(bd)
     print('-' * 50)
-    # print(repr(valid_location(bd, 1)))
-    # print(repr(valid_action(bd, player=1)))
-    print(feature(bd, 1))
+    print(repr(valid_location(bd, 1)))
+    print('-' * 50)
+    print(repr(valid_action(bd, player=1)))
+    # print(feature(bd, 1))
+
+if __name__ == '__main__':
+    _main()
