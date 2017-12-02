@@ -11,10 +11,8 @@ class PolicyNetwork:
     def __init__(self, filepath=None):
         if filepath:
             self.model = load_model(filepath)
-            self.predict = self.predict0 if filepath.endswith('model0') else self.predict1
         else:
-            self.model = self.create_model0()
-            self.predict = self.predict0
+            self.model = self.create_model()
         self.predicts = set()
         # 跟踪上一步的值，供调试
         self.p = None
@@ -22,106 +20,23 @@ class PolicyNetwork:
         self.r = None
 
     @staticmethod
-    def create_model0():
-        # 定义顺序模型
-        model = Sequential()
-        # 输出层
-        model.add(Dense(100, activation='softmax', input_dim=125, use_bias=False, kernel_initializer='zeros'))
-        # 定义优化器
-        # opt = Adam(lr=1e-4)
-        opt = SGD()
-        # 定义优化器，loss function，训练过程中计算准确率
-        model.compile(optimizer=opt, loss='categorical_crossentropy')
-
-        return model
-
-    @staticmethod
     def create_model():
-        # 定义顺序模型
-        model = Sequential()
+        raise NotImplementedError
 
-        # 第一个卷积层
-        # input_shape 输入平面
-        # filters 卷积核/滤波器个数
-        # kernel_size 卷积窗口大小
-        # strides 步长
-        # padding padding方式 same/valid
-        # activation 激活函数
-        model.add(Convolution2D(
-            filters = 25,
-            kernel_size = 2,
-            input_shape=(5,5,5),
-            strides = 1,
-            padding = 'same',
-            activation = 'relu'
-        ))
-
-        def create_conv_layer(filters=25):
-            return Convolution2D(filters, 2, strides=1, padding='same', activation='relu', kernel_initializer='zeros', bias_initializer='zeros', kernel_regularizer='l2', bias_regularizer='l2')
-
-        # 第二个卷积层
-        model.add(create_conv_layer())
-
-        # 第三个卷积层
-        model.add(create_conv_layer())
-
-        # 第四个卷积层
-        model.add(create_conv_layer())
-
-        # 第五个卷积层
-        model.add(create_conv_layer())
-
-        # model.add(Convolution2D(4, 1, strides=1, padding='same', activation='linear', kernel_initializer='zeros', bias_initializer='zeros', kernel_regularizer='l2', bias_regularizer='l2'))
-
-        # 把卷积层的输出扁平化为1维
-        model.add(Flatten())
-
-        # 输出层
-        model.add(Dense(100, activation='softmax', kernel_regularizer='l2', bias_regularizer='l2'))
-
-        # 定义优化器
-        # opt = Adam(lr=1e-4)
-        opt = SGD()
-
-        # 定义优化器，loss function，训练过程中计算准确率
-        model.compile(optimizer=opt, loss='categorical_crossentropy')
-
-        return model
-
-    def train(self, x_train, y_train, batch_size=1, epochs=5):
+    def _train(self, x_train, y_train, batch_size=1, epochs=5):
         # 训练模型
         self.model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=0)
 
+    def predict(self, board, player):
+        raise NotImplementedError
 
-    def predict0(self, board, player, trace=False):
-        x = rule.feature(board, player).flatten()
-        valid = rule.valid_action(board, player)
-        return self._predict(x, board, valid, trace)
-
-    def predict1(self, board, player, trace=False):
-        x = rule.feature(board, player)
-        valid = rule.valid_action(board, player)
-        return self._predict(x, board, valid, trace)
-
-    def _predict(self, x, board, valid, trace=False):
+    def _predict(self, x, board, valid):
         # x = rule.feature(board, player)
         # valid = rule.valid_action(board, player)
         x = np.array([x])
         p = self.model.predict(x)[0]
         p = p.reshape(5,5,4)
         r = p * valid   # 所有可能走法的概率
-        if trace:
-            print('board:')
-            print(board)
-            print('p shape:', p.shape, 'is:')
-            print(p)
-            print('-' * 50)
-            print('valid is:')
-            print(valid)
-            print('-' * 50)
-            print('r is:')
-            print(r)
-            print('-' * 50)
         board_str = ''.join(map(str, board.flatten()))
 
         try:
@@ -174,7 +89,7 @@ class PolicyNetwork:
             raise e
 
     @staticmethod
-    def policy(actions, probs):
+    def action_by_prob(actions, probs):
         # print(actions)
         # print(probs)
         rd = np.random.rand()
@@ -184,13 +99,13 @@ class PolicyNetwork:
             if s > rd:
                 return actions[i]
 
-    def rollout(self, board, player):
-        x = rule.feature(board, player).flatten()
-        # x = rule.feature(board, player)
+    def policy(self, board, player):
+        raise NotImplementedError
+
+    def _policy(self, x, board, valid):
         x = np.array([x])
         p = self.model.predict(x)[0]
         p = p.reshape(5, 5, 4)
-        valid = rule.valid_action(board, player)
         r = p * valid  # 所有可能走法的概率
         self.set_pre(p, valid, r)
         try:
@@ -200,17 +115,14 @@ class PolicyNetwork:
                     # 最大概率为0，随机选择
                     print('>> max prob is 0 radom choise...')
                     valid_index = np.argwhere(valid == 1)
-                    if len(valid_index) == 0:
-                        raise ValueError('no valid action')
+                    assert len(valid_index) > 0, 'no valid action'
                     row, col, action = valid_index[np.random.randint(len(valid_index))]
                     return (row, col), action
                 else:
                     r = r / r.sum()
                     idx = np.argwhere(r > 0)
                     prob = [r[tuple(i)] for i in idx]
-                    row,col,action = self.policy(idx, prob)
-                    if n > 100:
-                        print(idx, prob)
+                    row,col,action = self.action_by_prob(idx, prob)
                 predict_str = ''.join(map(str,board.flatten())) + str(row) +str(col) + str(action)
                 if predict_str not in self.predicts:
                     self.predicts.add(predict_str)
@@ -218,12 +130,11 @@ class PolicyNetwork:
                 else:
                     r[row,col,action] = 0
                 if n > 100:
-                    print('!select:', n, (row, col, action))
+                    print('!select:', n, (row, col, action), idx, prob)
                 n +=1
         except Exception as e:
             print('board:')
             print(board)
-            print('player:', player)
             print('p shape:', p.shape, 'is:')
             print(p)
             print('-' * 50)
@@ -249,19 +160,126 @@ class PolicyNetwork:
     def save_model(self, filepath):
         self.model.save(filepath)
 
+
+class RolloutPolicyNetwork(PolicyNetwork):
+    @staticmethod
+    def create_model():
+        # 定义顺序模型
+        model = Sequential()
+        # 输出层
+        model.add(Dense(100, activation='softmax', input_dim=125, use_bias=False, kernel_initializer='zeros'))
+        # 定义优化器
+        # opt = Adam(lr=1e-4)
+        opt = SGD()
+        # 定义优化器，loss function，训练过程中计算准确率
+        model.compile(optimizer=opt, loss='categorical_crossentropy')
+        return model
+
+    def train(self, records):
+        x_train = []
+        y_train = []
+        for bd, from_, action, reward in records:
+            player = bd[from_]
+            x = rule.feature(bd, player)
+            y = np.zeros((5, 5, 4))
+            y[from_][action] = reward
+            x_train.append(x.flatten())
+            y_train.append(y.flatten())
+        self._train(np.array(x_train, copy=False), np.array(y_train, copy=False))
+
+    def predict(self, board, player):
+        x = rule.feature(board, player).flatten()
+        valid = rule.valid_action(board, player)
+        return self._predict(x, board, valid)
+
+    def policy(self, board, player):
+        x = rule.feature(board, player).flatten()
+        valid = rule.valid_action(board, player)
+        return self._policy(x, board, valid)
+
+
+class ConvolutionPolicyNetwork(PolicyNetwork):
+    @staticmethod
+    def create_model():
+        # 定义顺序模型
+        model = Sequential()
+        # 第一个卷积层
+        # input_shape 输入平面
+        # filters 卷积核/滤波器个数
+        # kernel_size 卷积窗口大小
+        # strides 步长
+        # padding padding方式 same/valid
+        # activation 激活函数
+        model.add(Convolution2D(
+            filters = 25,
+            kernel_size = 2,
+            input_shape=(5,5,5),
+            strides = 1,
+            padding = 'same',
+            activation = 'relu',
+            use_bias=False, kernel_initializer='zeros', kernel_regularizer='l2'
+        ))
+        def create_conv_layer(filters=25):
+            return Convolution2D(filters, 2, strides=1, padding='same', activation='relu',
+                                    use_bias=False, kernel_initializer='zeros', kernel_regularizer='l2')
+        # 第二个卷积层
+        model.add(create_conv_layer())
+        # 第三个卷积层
+        model.add(create_conv_layer())
+        # 第四个卷积层
+        model.add(create_conv_layer())
+        # 第五个卷积层
+        model.add(create_conv_layer())
+        # 把卷积层的输出扁平化为1维
+        model.add(Flatten())
+        # 输出层
+        model.add(Dense(100, activation='softmax',
+                        kernel_initializer='zeros', bias_initializer='zeros',
+                        kernel_regularizer='l2', bias_regularizer='l2'))
+        # 定义优化器
+        # opt = Adam(lr=1e-4)
+        opt = SGD()
+        # 定义优化器，loss function
+        model.compile(optimizer=opt, loss='categorical_crossentropy')
+        return model
+
+    def train(self, records):
+        x_train = []
+        y_train = []
+        for bd, from_, action, reward in records:
+            player = bd[from_]
+            x = rule.feature(bd, player)
+            y = np.zeros((5, 5, 4))
+            y[from_][action] = reward
+            x_train.append(x)
+            y_train.append(y.flatten())
+        self._train(np.array(x_train, copy=False), np.array(y_train, copy=False))
+
+    def predict(self, board, player):
+        x = rule.feature(board, player)
+        valid = rule.valid_action(board, player)
+        return self._predict(x, board, valid)
+
+    def policy(self, board, player):
+        x = rule.feature(board, player)
+        valid = rule.valid_action(board, player)
+        return self._policy(x, board, valid)
+
+
 @print_use_time()
 def simulate(nw0, nw1):
     board = np.zeros((5, 5))
     board[0,:] = -1
     board[4,:] = 1
     player = 1
-    records = Record('records/train/')
+    records = Record()
     while True:
         nw = nw0 if player == 1 else nw1
         bd = board.copy()
         try:
-            from_, action = nw.rollout(board, player)
+            from_, action = nw.policy(board, player)
             # print('>', from_, action)
+            assert board[from_] == player
             to_ = tuple(np.add(from_, rule.actions_move[action]))
             command,eat = rule.move(board, from_, to_)
             reward = len(eat)
@@ -269,6 +287,7 @@ def simulate(nw0, nw1):
         except Exception as e:
             print('board is:')
             print(board)
+            print('player is:', player)
             valid = rule.valid_action(board, player)
             print('predict is:')
             print(nw.p)
@@ -279,7 +298,7 @@ def simulate(nw0, nw1):
             print(nw.r)
             print('from, action is:', from_, action)
             print('prob is:', valid[from_][action])
-            records.save()
+            records.save('records/train/')
             raise e
         # if eat:
         #     print(player, from_, to_, eat, N)
@@ -302,34 +321,38 @@ def train(n0, n1, i):
         return
 
     if i%100==0:
-        records.save()
-
-    x_train = []
-    y_train = []
-    for bd, from_, action, reward in records:
-        player = bd[from_]
-        x = rule.feature(bd, player)
-        y = np.zeros((5,5,4))
-        y[from_][action] = reward
-        x_train.append(x.flatten())
-        y_train.append(y.flatten())
+        records.save('records/train/')
 
     n1.copy(n0)
-    n0.train(np.array(x_train, copy=False), np.array(y_train, copy=False))
+    n0.train(records)
 
 def _main():
     print('...begin...')
     print_time_func.add('simulate')
     print_time_func.add('train')
-    n0 = PolicyNetwork('model/policy_network2_016.model0')
-    n1 = PolicyNetwork()
+    n0 = RolloutPolicyNetwork('model/policy_network3_075.model0')
+    n1 = RolloutPolicyNetwork()
     n1.copy(n0)
     episode = 10000
-    for i in range(1600,episode+1,1):
+    for i in range(7501,episode+1,1):
         train(n0, n1, i)
         if i % 100 == 0:
-            n0.save_model('model/policy_network2_%03d.model0' % (i // 100))
+            n0.save_model('model/policy_network3_%03d.model0' % (i // 100))
+
+def _main2():
+    print('...begin...')
+    print_time_func.add('simulate')
+    print_time_func.add('train')
+    n0 = ConvolutionPolicyNetwork()
+    n1 = ConvolutionPolicyNetwork()
+    n1.copy(n0)
+    episode = 10000
+    for i in range(1,episode+1,1):
+        train(n0, n1, i)
+        if i % 100 == 0:
+            n0.save_model('model/convolution_policy_network_%03d.model' % (i // 100))
 
 
 if __name__ == '__main__':
     _main()
+    # _main2()

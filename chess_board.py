@@ -5,6 +5,7 @@ import threading
 import chess_rule as rule
 from tkinter import font
 from tkinter import messagebox
+from tkinter import filedialog
 from player import HummaPlayer, PolicyNetworkPlayer
 from record import Record
 
@@ -53,14 +54,21 @@ class ChessBoard:
 
         # 开始按扭
         start_btn_text = tk.StringVar(window, value='start')
-        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=100, y=620)
+        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=10, y=620)
 
         # replay按扭
-        tk.Button(window, text='replay', command=self.replay).place(x=200, y=620)
+        tk.Button(window, text='replay', command=self.replay).place(x=80, y=620)
+
+        # 选择棋谱
+        tk.Label(window, text='棋谱:').place(x=150, y=623)
+        record_path = tk.StringVar()
+        record_entry = tk.Entry(window, textvariable=record_path, width=10)
+        record_entry.place(x=185, y=620)
+        tk.Button(text='open', command=self.select_record).place(x=280, y=620)
 
         # 速度调节按扭
-        tk.Button(window, text='faster', command=lambda:self.change_period(0.5)).place(x=300, y=620)
-        tk.Button(window, text='slower', command=lambda:self.change_period(2)).place(x=400, y=620)
+        tk.Button(window, text='faster', command=lambda:self.change_period(0.5)).place(x=350, y=620)
+        tk.Button(window, text='slower', command=lambda:self.change_period(2)).place(x=420, y=620)
 
         # 暂停按扭
         pause_text = tk.StringVar(value='pause')
@@ -87,9 +95,10 @@ class ChessBoard:
         self.winner = None
         self.ended = False
         self.start_btn_text = start_btn_text
+        self.record_path = record_path
+        self.record_entry = record_entry
         self.event = threading.Event()
-        self.record = Record('records/app/')    # 记录棋谱: board:from_:to_:del_num
-        self.record_path = ''
+        self.record = Record()    # 记录棋谱: board:from_:to_:del_num
         self.init_stone()
 
     def start(self):
@@ -99,7 +108,7 @@ class ChessBoard:
         self.clear()
         self.init_stone()
 
-        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/policy_network2_082.model0')
+        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/policy_network3_065.model0')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
 
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
@@ -127,14 +136,16 @@ class ChessBoard:
         print(self.current_player, ' play...')
         if self.current_player.is_humman():
             return
-        from_,to_ = self.current_player.play(self.board())
-        stone = self.stone(from_)
-        result = self.move_to(stone, to_)
-        if result == rule.ACCQUIRE:
-            self.switch_player_and_play()
-        elif result == rule.WIN:
-            print('GAME OVER, WINNER IS', stone.player.name)
-            self.game_over(stone.player)
+        def _play():
+            from_,to_ = self.current_player.play(self.board())
+            stone = self.stone(from_)
+            result = self.move_to(stone, to_)
+            if result == rule.ACCQUIRE:
+                self.switch_player_and_play()
+            elif result == rule.WIN:
+                print('GAME OVER, WINNER IS', stone.player.name)
+                self.game_over(stone.player)
+        self.window.after(int(self.period * 1000), _play)
 
     def clear(self):
         for board_row in self._stone:
@@ -196,7 +207,7 @@ class ChessBoard:
         self.hide_signal()
         self.show_winner()
         self.start_btn_text.set('start')
-        self.record_path = self.record.save()
+        self.record_path.set(self.record.save('records/app/' + winner.name + '_'))
         self.record.clear()
 
     def board(self):
@@ -277,9 +288,10 @@ class ChessBoard:
         return result
 
     def replay(self):
-        recordpath = 'records/train/1512130266665156.record'
-        if self.record_path:
-            recordpath = self.record_path
+        recordpath = self.record_path.get()
+        if not recordpath:
+            messagebox.showinfo(title='请选择', message='请点击"open"按扭选择棋谱位置')
+            return
         self.clear()
         self.init_stone()
         self.event.set()
@@ -291,11 +303,7 @@ class ChessBoard:
         def play_next_step():
             self.event.wait()
             board, from_, action, reward = next(record_iter)
-            if not (board == self.board()).all():
-                print(board)
-                print('-' * 50)
-                print(self.board())
-                raise ValueError
+            assert (board == self.board()).all(), str(board) + '\n' + str(self.board())
             player = board[from_]
             to_ = tuple(np.add(from_, rule.actions_move[action]))
             result = self.move_to(self.stone(from_), to_)
@@ -305,8 +313,12 @@ class ChessBoard:
             self.text.config(text=str(length) + ':' + str(record.n) + ',reward: ' + str(reward))
             record.n += 1
             threading.Timer(self.period, play_next_step).start()
-            # self.window.after(self.period * 1000, play_next_step)
         threading.Timer(self.period, play_next_step).start()
+
+    def select_record(self):
+        f = filedialog.askopenfilename()
+        self.record_path.set(f)
+        self.record_entry.index(len(f)-10)
 
     def pause(self):
         if self.pause_text.get() == 'pause':

@@ -1,4 +1,4 @@
-from policy_network import PolicyNetwork
+from policy_network import RolloutPolicyNetwork, ConvolutionPolicyNetwork
 import chess_rule as rule
 import numpy as np
 
@@ -41,11 +41,11 @@ class HummaPlayer(Player):
 class PolicyNetworkPlayer(Player):
     def __init__(self, name, stone_val, signal, winner_text, clock, modelfile):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, type_=COMPUTER)
-        self.policy = PolicyNetwork(modelfile)
+        self.policy = RolloutPolicyNetwork(modelfile)
 
     def play(self, board):
         print(self.name + ' play...')
-        from_, action = self.policy.predict(board, self.stone_val, trace=True)
+        from_, action = self.policy.predict(board, self.stone_val)
         to_ = tuple(np.add(from_, rule.actions_move[action]))
         print(from_, to_)
         return from_, to_

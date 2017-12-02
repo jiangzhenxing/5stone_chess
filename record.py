@@ -6,8 +6,7 @@ class Record:
     """
     棋谱,格式为：[board, from_, action, reward]
     """
-    def __init__(self, path='records/', gamma=0.9):
-        self.path = path
+    def __init__(self, gamma=0.9):
         self.gamma = gamma
         self.records = []
 
@@ -17,6 +16,8 @@ class Record:
         if reward > 0:
             for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]==player, reversed(self.records[:-1]))):
                 r[-1] += (reward * self.gamma ** (i + 1))
+            for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]!=player, reversed(self.records[:-1]))):
+                r[-1] -= (reward * self.gamma ** i)
         if win:
             for record in self.records:
                 b, f, _, _ = record
@@ -25,11 +26,11 @@ class Record:
     def __iter__(self):
         return iter(self.records)
 
-    def save(self):
+    def save(self, path_pre):
         """
         保存棋谱
         """
-        filepath = self.path + str(int(time.time() * 1000)) + str(len(self.records)) + '.record'
+        filepath = path_pre + str(int(time.time() * 1000)) + str(len(self.records)) + '.record'
         f = open(filepath, 'w')
         for board, from_, action, reward in self.records:
             board = ''.join(map(str, board.flatten().astype(np.int8) + 1))
