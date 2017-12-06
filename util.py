@@ -1,4 +1,6 @@
 import time
+import logging
+
 
 print_time_flag = True
 print_time_func = set() # update_qtable
@@ -15,9 +17,13 @@ def print_use_time(min_time=1):
                 result = func(*args, **kwargs)
                 use_time = int((time.time() - start) * 1000)
                 if use_time > min_time:
-                    print(func.__name__, 'use:', use_time)
+                    logging.info('%s use: %d', func.__name__, use_time)
             else:
                 result = func(*args, **kwargs)
             return result
         return call
     return timer
+
+def add_print_time_fun(func):
+    for f in func:
+        print_time_func.add(f)

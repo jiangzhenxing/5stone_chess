@@ -1,16 +1,21 @@
 import numpy as np
 from keras.models import Sequential, load_model
-from keras.layers import Dense,Dropout,Convolution2D,MaxPooling2D,Flatten
+from keras.layers import Dense,Dropout,LocallyConnected1D,Convolution2D,MaxPooling2D,Flatten,Reshape,Highway
 from keras.optimizers import Adam, SGD
+from keras.regularizers import l2
 import chess_rule as rule
-from util import print_time_func, print_use_time
+from util import add_print_time_fun, print_use_time
 from record import Record
+import logging
 
+import keras.initializers
+
+logger = logging.getLogger('train')
 
 class PolicyNetwork:
     def __init__(self, filepath=None):
         if filepath:
-            self.model = load_model(filepath)
+            self.model = load_model(filepath, custom_objects={'SoftmaxLayer': SoftmaxLayer})
         else:
             self.model = self.create_model()
         self.predicts = set()
@@ -20,12 +25,26 @@ class PolicyNetwork:
         self.r = None
 
     @staticmethod
+    def load(modelfile):
+        if modelfile.index('convolution'):
+            return ConvolutionPolicyNetwork(modelfile)
+        else:
+            return RolloutPolicyNetwork(modelfile)
+
+    @staticmethod
     def create_model():
         raise NotImplementedError
 
-    def _train(self, x_train, y_train, batch_size=1, epochs=5):
+    def train(self, records, batch_size=1, epochs=10, verbose=0):
+        raise NotImplementedError
+
+    def _train(self, x_train, y_train, batch_size=1, epochs=5, verbose=0):
         # 训练模型
-        self.model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=0)
+        # logger.info('x0 is:%s', x_train[0])
+        # logger.info('y0 is:%s', y_train[0])
+        self.model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose)
+        # l = self.model.layers[-2]
+        # logger.info('weights: %s', l.get_weights())
 
     def predict(self, board, player):
         raise NotImplementedError
@@ -40,34 +59,28 @@ class PolicyNetwork:
         board_str = ''.join(map(str, board.flatten()))
 
         try:
+            logging.info('最大概率:%.2f:%s(%.2f):%s, 和:%.2f, 平均:%.2f', np.max(r), np.argmax(r), np.max(p), np.argmax(p), r.sum(), r.sum()/valid.sum())
             if np.max(r) == 0:
                 # 最大概率为0，随机选择
-                print('>> max prob is 0 radom choise...')
+                logging.info('>> max prob is 0 random choise...')
                 valid_index = np.argwhere(valid==1)
-                if len(valid_index)==0:
-                    raise ValueError('no valid action')
+                assert len(valid_index) > 0, 'no valid action'
                 row, col, action = valid_index[np.random.randint(len(valid_index))]
                 self.predicts.add((board_str, row, col, action))
                 self.set_pre(p, valid, r)
                 return (row, col), action
-
-            def choose_max():
+            check = True
+            while True:
+                if np.max(r) == 0:
+                    # 如果最大值是0，说明所有步法之前已经走过，重新取最大概率步
+                    logging.info('>> max prob is 0, rechoise')
+                    r = p * valid
+                    check = False
+                # 选择最大概率
                 mx = np.max(r)  # 最大概率
                 mx_index = np.argwhere(r == mx)  # 所有最大概率的位置
-                return mx_index[np.random.randint(len(mx_index))]  # 从最大概率的动作中随机选择
-
-            while True:
-                row, col, action = choose_max()
-                if r[row,col,action] == 0:
-                    # 如果最大值是0，说明所有步法之前已经走过，重新取最大概率步
-                    print('>> max prob is 0, rechoise')
-                    r = p * valid
-                    row, col, action = choose_max()
-                    self.predicts.add((board_str, row, col, action))
-                    self.set_pre(p, valid, r)
-                    return (row, col), action
-
-                if (board_str,row,col,action) in self.predicts:
+                row, col, action = mx_index[np.random.randint(len(mx_index))]  # 从最大概率的动作中随机选择
+                if check and (board_str,row,col,action) in self.predicts:
                     # 如果此步已经走过了，将其概率置为0，重新选择
                     r[row,col,action] = 0
                 else:
@@ -75,23 +88,23 @@ class PolicyNetwork:
                     self.set_pre(p, valid, r)
                     return (row,col),action
         except Exception as e:
-            print('board:')
-            print(board)
-            print('p shape:', p.shape, 'is:')
-            print(p)
-            print('-' * 50)
-            print('valid action is:')
-            print(valid)
-            print('-' * 50)
-            print('r is:')
-            print(r)
-            print('-' * 50)
+            logging.info('board:')
+            logging.info(board)
+            logging.info('p(shape:%s) is:', p.shape)
+            logging.info(p)
+            logging.info('-' * 50)
+            logging.info('valid action is:')
+            logging.info(valid)
+            logging.info('-' * 50)
+            logging.info('r is:')
+            logging.info(r)
+            logging.info('-' * 50)
             raise e
 
     @staticmethod
     def action_by_prob(actions, probs):
-        # print(actions)
-        # print(probs)
+        # logging.debug(actions)
+        # logging.debug(probs)
         rd = np.random.rand()
         s = 0
         for i,p in enumerate(probs):
@@ -105,45 +118,64 @@ class PolicyNetwork:
     def _policy(self, x, board, valid):
         x = np.array([x])
         p = self.model.predict(x)[0]
+        # logger.info('p.shape: %s', p.shape)
+        # for l in self.model.layers:
+        #     logger.info('layer %s, output shape: %s', l, l.output_shape)
         p = p.reshape(5, 5, 4)
         r = p * valid  # 所有可能走法的概率
         self.set_pre(p, valid, r)
+        board_str = ''.join(map(str, board.flatten()))
         try:
+            maxr = np.max(r)
+            maxp = np.max(p)
+            logging.info('最大概率:%.4f(%s)_%.4f(%s), 和:%.4f, 平均:%.4f',
+                         maxr, ','.join(map(str,np.argwhere(r==maxr)[0])),
+                         maxp, ','.join(map(str,np.argwhere(p==maxp)[0])),
+                         r.sum(), r.sum()/valid.sum())
             n = 0
+            check = True
+            if maxr == 0:
+                # 最大概率为0，随机选择
+                logging.info('>> max prob is 0 radom choise...')
+                valid_index = np.argwhere(valid == 1)
+                assert len(valid_index) > 0, 'no valid action'
+                row, col, action = valid_index[np.random.randint(len(valid_index))]
+                self.predicts.add((board_str, row, col, action))
+                self.set_pre(p, valid, r)
+                return (row, col), action
             while True:
                 if np.max(r) == 0:
-                    # 最大概率为0，随机选择
-                    print('>> max prob is 0 radom choise...')
-                    valid_index = np.argwhere(valid == 1)
-                    assert len(valid_index) > 0, 'no valid action'
-                    row, col, action = valid_index[np.random.randint(len(valid_index))]
-                    return (row, col), action
+                    # 最大概率为0，说明所有的步法之前均已走过，重新按概率选择
+                    logging.info('>> max prob is 0 rechoise by prob...')
+                    r = p * valid
+                    check = False
+                # 按概率选择
+                r = r / r.sum()
+                idx = np.argwhere(r > 0)
+                prob = [r[tuple(i)] for i in idx]
+                row,col,action = self.action_by_prob(idx, prob)
+                if check and (board_str,row,col,action) in self.predicts:
+                    r[row, col, action] = 0
                 else:
-                    r = r / r.sum()
-                    idx = np.argwhere(r > 0)
-                    prob = [r[tuple(i)] for i in idx]
-                    row,col,action = self.action_by_prob(idx, prob)
-                predict_str = ''.join(map(str,board.flatten())) + str(row) +str(col) + str(action)
-                if predict_str not in self.predicts:
-                    self.predicts.add(predict_str)
+                    self.predicts.add((board_str, row, col, action))
                     return (row, col), action
-                else:
-                    r[row,col,action] = 0
                 if n > 100:
-                    print('!select:', n, (row, col, action), idx, prob)
+                    logging.info('!select: %s, %s, %s, %s', n, (row, col, action), idx, prob)
                 n +=1
         except Exception as e:
-            print('board:')
-            print(board)
-            print('p shape:', p.shape, 'is:')
-            print(p)
-            print('-' * 50)
-            print('valid action is:')
-            print(valid)
-            print('-' * 50)
-            print('r is:')
-            print(r)
-            print('-' * 50)
+            logging.info('board:')
+            logging.info(board)
+            logging.info('p(shape:%s) is:', p.shape)
+            logging.info(p)
+            logging.info('-' * 50)
+            logging.info('valid action is:')
+            logging.info(valid)
+            logging.info('-' * 50)
+            logging.info('r is:')
+            logging.info(r)
+            logging.info('-' * 50)
+            for l in self.model.layers:
+                logger.info('%s weights: %s\n', l, l.get_weights())
             raise e
 
     def set_pre(self, p, valid, r):
@@ -175,7 +207,7 @@ class RolloutPolicyNetwork(PolicyNetwork):
         model.compile(optimizer=opt, loss='categorical_crossentropy')
         return model
 
-    def train(self, records):
+    def train(self, records, batch_size=1, epochs=10, verbose=0):
         x_train = []
         y_train = []
         for bd, from_, action, reward in records:
@@ -185,7 +217,7 @@ class RolloutPolicyNetwork(PolicyNetwork):
             y[from_][action] = reward
             x_train.append(x.flatten())
             y_train.append(y.flatten())
-        self._train(np.array(x_train, copy=False), np.array(y_train, copy=False))
+        self._train(np.array(x_train, copy=False), np.array(y_train, copy=False), batch_size=batch_size, epochs=epochs, verbose=verbose)
 
     def predict(self, board, player):
         x = rule.feature(board, player).flatten()
@@ -203,25 +235,26 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
     def create_model():
         # 定义顺序模型
         model = Sequential()
+        l = 1e-3
         # 第一个卷积层
-        # input_shape 输入平面
-        # filters 卷积核/滤波器个数
-        # kernel_size 卷积窗口大小
-        # strides 步长
-        # padding padding方式 same/valid
-        # activation 激活函数
         model.add(Convolution2D(
-            filters = 25,
-            kernel_size = 2,
-            input_shape=(5,5,5),
-            strides = 1,
-            padding = 'same',
-            activation = 'relu',
-            use_bias=False, kernel_initializer='zeros', kernel_regularizer='l2'
+            filters = 50,           # 卷积核/滤波器个数
+            kernel_size = 3,        # 卷积窗口大小
+            input_shape = (5,5,10), # 输入平面的形状
+            strides = 1,            # 步长
+            padding = 'same',       # padding方式 same:保持图大小不变/valid
+            activation = 'relu',    # 激活函数
+            use_bias=False,
+            kernel_regularizer=l2(l)
         ))
-        def create_conv_layer(filters=25):
-            return Convolution2D(filters, 2, strides=1, padding='same', activation='relu',
-                                    use_bias=False, kernel_initializer='zeros', kernel_regularizer='l2')
+        def create_conv_layer(filters=50, kernel_size=3,):
+            return Convolution2D(filters,
+                                 kernel_size,
+                                 strides = 1,
+                                 padding = 'same',
+                                 activation = 'relu',
+                                 use_bias = False,
+                                 kernel_regularizer = l2(l))
         # 第二个卷积层
         model.add(create_conv_layer())
         # 第三个卷积层
@@ -229,21 +262,36 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
         # 第四个卷积层
         model.add(create_conv_layer())
         # 第五个卷积层
-        model.add(create_conv_layer())
+        model.add(create_conv_layer(filters=4, kernel_size=1))
+        # model.add(Convolution2D(4, 1, strides=1, padding='same', use_bias=False, kernel_initializer='zeros', kernel_regularizer=l2(l), name='c2'))
         # 把卷积层的输出扁平化为1维
         model.add(Flatten())
-        # 输出层
-        model.add(Dense(100, activation='softmax',
-                        kernel_initializer='zeros', bias_initializer='zeros',
-                        kernel_regularizer='l2', bias_regularizer='l2'))
+        # model.add(Dropout(0.5, name='dropout'))
+        # model.add(SoftmaxLayer((5,5,4)))
+        model.add(Dense(units=100,
+                        activation='softmax',
+                        kernel_initializer='zeros',
+                        kernel_regularizer=l2(l),
+                        use_bias=False,
+                        # bias_initializer='zeros', bias_regularizer=l2(l)))
+                        ))
+
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD()
+        opt = SGD(lr=1e-3)
         # 定义优化器，loss function
         model.compile(optimizer=opt, loss='categorical_crossentropy')
         return model
 
-    def train(self, records):
+    def set_dropout(self, rate):
+        # dropout = self.model.get_layer(name='dropout')
+        # dropout.rate = rate
+        pass
+
+    def get_layer(self, name):
+        return self.model.get_layer(name)
+
+    def train(self, records, batch_size=1, epochs=5, verbose=0):
         x_train = []
         y_train = []
         for bd, from_, action, reward in records:
@@ -253,18 +301,47 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
             y[from_][action] = reward
             x_train.append(x)
             y_train.append(y.flatten())
-        self._train(np.array(x_train, copy=False), np.array(y_train, copy=False))
+        self.set_dropout(0.5)
+        self._train(np.array(x_train, copy=False), np.array(y_train, copy=False), batch_size=batch_size, epochs=epochs, verbose=verbose)
+        # logger.info('weights: %s', self.model.get_weights())
 
     def predict(self, board, player):
         x = rule.feature(board, player)
         valid = rule.valid_action(board, player)
+        self.set_dropout(0)
         return self._predict(x, board, valid)
 
     def policy(self, board, player):
         x = rule.feature(board, player)
         valid = rule.valid_action(board, player)
+        self.set_dropout(0)
         return self._policy(x, board, valid)
 
+from keras import backend as K
+from keras.engine.topology import Layer
+import numpy as np
+
+class SoftmaxLayer(Layer):
+    def __init__(self, output_dim=(5,5,4), **kwargs):
+        self.output_dim = output_dim
+        super(SoftmaxLayer, self).__init__(**kwargs)
+
+    # def build(self, input_shape):
+    #     # Create a trainable weight variable for this layer.
+    #     self.kernel = self.add_weight(name='kernel',
+    #                                   shape=(input_shape[1], 1),
+    #                                   initializer='ones',
+    #                                   trainable=True)
+    #     self.bias = None
+    #     super(SoftmaxLayer, self).build(input_shape)  # Be sure to call this somewhere!
+
+    def call(self, inputs):
+        flatten = K.batch_flatten(inputs)
+        logger.info('len(flatten): %s', flatten)
+        return K.reshape(K.softmax(flatten), (-1,*self.output_dim))
+
+    def compute_output_shape(self, input_shape):
+        return (-1,*self.output_dim)
 
 @print_use_time()
 def simulate(nw0, nw1):
@@ -285,51 +362,50 @@ def simulate(nw0, nw1):
             reward = len(eat)
             records.add(bd, from_, action, reward, win=command==rule.WIN)
         except Exception as e:
-            print('board is:')
-            print(board)
-            print('player is:', player)
+            logging.info('board is:')
+            logging.info(board)
+            logging.info('player is: %s', player)
             valid = rule.valid_action(board, player)
-            print('predict is:')
+            logging.info('predict is:')
             print(nw.p)
-            print('sum is:', nw.p.sum())
-            print('valid action is:')
-            print(nw.valid)
-            print('p * valid is:')
-            print(nw.r)
-            print('from, action is:', from_, action)
-            print('prob is:', valid[from_][action])
+            logging.info('sum is: %s', nw.p.sum())
+            logging.info('valid action is:')
+            logging.info(nw.valid)
+            logging.info('p * valid is:')
+            logging.info(nw.r)
+            logging.info('from:%s, action:%s', from_, action)
+            logging.info('prob is: %s', valid[from_][action])
             records.save('records/train/')
             raise e
         # if eat:
         #     print(player, from_, to_, eat, N)
         if command == rule.WIN:
-            print(str(player) + ' WIN, step use:', records.length())
+            logging.info('%s WIN, step use: %s', str(player), records.length())
             return records, player
         if records.length() > 10000:
-            print('走子数过多:', records.length())
+            logging.info('走子数过多: %s', records.length())
             return Record(''),0
         player = -player
 
 @print_use_time()
 def train(n0, n1, i):
-    print('train:', i)
+    logging.info('train: %d', i)
     records, winner = simulate(n0, n1)
     n0.clear()
     n1.clear()
 
-    if records.length == 0:
+    if records.length() == 0:
         return
 
-    if i%100==0:
+    if i%50==0:
         records.save('records/train/')
 
     n1.copy(n0)
     n0.train(records)
 
 def _main():
-    print('...begin...')
-    print_time_func.add('simulate')
-    print_time_func.add('train')
+    logging.info('...begin...')
+    add_print_time_fun(['simulate', 'train'])
     n0 = RolloutPolicyNetwork('model/policy_network3_075.model0')
     n1 = RolloutPolicyNetwork()
     n1.copy(n0)
@@ -337,12 +413,11 @@ def _main():
     for i in range(7501,episode+1,1):
         train(n0, n1, i)
         if i % 100 == 0:
-            n0.save_model('model/policy_network3_%03d.model0' % (i // 100))
+            n0.save_model('model/rollout_policy_network3_%03d.model0' % (i // 100))
 
 def _main2():
-    print('...begin...')
-    print_time_func.add('simulate')
-    print_time_func.add('train')
+    logging.info('...begin...')
+    add_print_time_fun(['simulate', 'train'])
     n0 = ConvolutionPolicyNetwork()
     n1 = ConvolutionPolicyNetwork()
     n1.copy(n0)
@@ -354,5 +429,7 @@ def _main2():
 
 
 if __name__ == '__main__':
-    _main()
-    # _main2()
+    import logging.config
+    logging.config.fileConfig('logging.conf')
+    # _main()
+    _main2()

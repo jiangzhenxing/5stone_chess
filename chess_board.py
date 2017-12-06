@@ -8,6 +8,9 @@ from tkinter import messagebox
 from tkinter import filedialog
 from player import HummaPlayer, PolicyNetworkPlayer
 from record import Record
+import logging
+
+logger = logging.getLogger('app')
 
 BLACK = 'BLACK'
 WHITE = 'WHITE'
@@ -92,6 +95,8 @@ class ChessBoard:
         self.current_player = None
         self.current_stone = None
         self.timer = None
+        self.play_timer = None
+        self.replay_timer = None
         self.winner = None
         self.ended = False
         self.start_btn_text = start_btn_text
@@ -108,7 +113,7 @@ class ChessBoard:
         self.clear()
         self.init_stone()
 
-        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/policy_network3_065.model0')
+        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/convolution_policy_network_001.model')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
 
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
@@ -130,10 +135,10 @@ class ChessBoard:
 
     def change_period(self, scale):
         self.period *= scale
-        print(self.period)
+        logger.debug(self.period)
 
     def play(self):
-        print(self.current_player, ' play...')
+        logger.info('%s play...', self.current_player)
         if self.current_player.is_humman():
             return
         def _play():
@@ -143,9 +148,9 @@ class ChessBoard:
             if result == rule.ACCQUIRE:
                 self.switch_player_and_play()
             elif result == rule.WIN:
-                print('GAME OVER, WINNER IS', stone.player.name)
+                logger.info('GAME OVER, WINNER IS %s', stone.player.name)
                 self.game_over(stone.player)
-        self.window.after(int(self.period * 1000), _play)
+        self.play_timer = self.window.after(int(self.period * 1000), _play)
 
     def clear(self):
         for board_row in self._stone:
@@ -154,8 +159,15 @@ class ChessBoard:
                     self.del_stone(s)
         if self.timer:
             self.cancel_timer()
+        if self.play_timer:
+            self.window.after_cancel(self.play_timer)
+        if self.replay_timer:
+            self.replay_timer.cancel()
         self.hide_signal()
         self.hide_winner()
+        self.start_btn_text.set('start')
+        self.pause_text.set('pause')
+        self.show_message('')
         self.black_player = None
         self.white_player = None
         self.current_player = None
@@ -163,6 +175,7 @@ class ChessBoard:
         self.timer = None
         self.winner = None
         self.ended = False
+        self.record.clear()
 
     def init_stone(self):
         stone, canvas, w, r, row, col = self._stone, self.canvas, self.w, self.r, self.row, self.col
@@ -213,14 +226,17 @@ class ChessBoard:
     def board(self):
         return np.array([[0 if s is None else s.value for s in row] for row in self._stone])
 
+    def show_message(self, message):
+        self.text.config(text=message)
+
     def onmotion(self, event):
-        self.text.config(text='position is (%d,%d)' % (event.x, event.y))
+        self.show_message('position is (%d,%d)' % (event.x, event.y))
         self.move_to_pos(self.current_stone, event.x, event.y)
 
     def onclick(self, event):
         x,y = event.x, event.y
         if  not (self.w - self.r < x < self.w * 5 + self.r and self.w - self.r < y < self.w * 5 + self.r):
-            self.text.config(text='click at (%d,%d)' % (event.x, event.y))
+            self.show_message('click at (%d,%d)' % (event.x, event.y))
             return
         if not self.current_player.is_humman():
             return
@@ -233,7 +249,7 @@ class ChessBoard:
         posx_d = posx - posx_i
         posy_d = posy - posy_i
 
-        self.text.config(text='click at (%d,%d) position is %d,%d' % (event.x, event.y, posx_i, posy_i))
+        self.show_message('click at (%d,%d) position is %d,%d' % (event.x, event.y, posx_i, posy_i))
 
         if 0.25 < posx_d < 0.75 and 0.25 < posy_d < 0.75:
             loc = self.pos_to_loc(x, y)
@@ -263,7 +279,7 @@ class ChessBoard:
         if result == rule.ACCQUIRE:
             self.switch_player_and_play()
         elif result == rule.WIN:
-            print('GAME OVER, WINNER IS', stone.player.name)
+            logger.info('GAME OVER, WINNER IS %s', stone.player.name)
             self.game_over(stone.player)
 
     def move_to(self, stone, to_loc):
@@ -276,21 +292,20 @@ class ChessBoard:
         old_board = self.board()
         from_ = stone.loc
         result,del_stone_loc = rule.move(self.board(), stone.loc, to_loc)
-        print(result, del_stone_loc)
         if result == rule.ACCQUIRE or result == rule.WIN:
             self.move_to_loc(stone, to_loc)
             for loc in del_stone_loc:
                 self.del_stone(self.stone(loc))
-            print(from_, to_loc)
+            logger.info('from %s to %s, result:%s, del:%s', from_, to_loc, result, del_stone_loc)
             action = rule.actions_move.index(tuple(np.subtract(to_loc, from_)))
-            print(action)
+            logger.debug('action is: %s', action)
             self.record.add(old_board, from_, action, len(del_stone_loc), win=(result==rule.WIN))
         return result
 
     def replay(self):
         recordpath = self.record_path.get()
         if not recordpath:
-            messagebox.showinfo(title='请选择', message='请点击"open"按扭选择棋谱位置')
+            self.show_message(message='请点击"open"按扭选择棋谱位置')
             return
         self.clear()
         self.init_stone()
@@ -302,23 +317,28 @@ class ChessBoard:
         record.n = 1
         def play_next_step():
             self.event.wait()
-            board, from_, action, reward = next(record_iter)
-            assert (board == self.board()).all(), str(board) + '\n' + str(self.board())
-            player = board[from_]
-            to_ = tuple(np.add(from_, rule.actions_move[action]))
-            result = self.move_to(self.stone(from_), to_)
-            if result == rule.WIN:
-                winner_text = self.winner_black if player==1 else self.winner_white
-                self.canvas.itemconfigure(winner_text, state=tk.NORMAL)
-            self.text.config(text=str(length) + ':' + str(record.n) + ',reward: ' + str(reward))
-            record.n += 1
-            threading.Timer(self.period, play_next_step).start()
+            try:
+                board, from_, action, reward = next(record_iter)
+                assert (board == self.board()).all(), str(board) + '\n' + str(self.board())
+                player = board[from_]
+                to_ = tuple(np.add(from_, rule.actions_move[action]))
+                result = self.move_to(self.stone(from_), to_)
+                if result == rule.WIN:
+                    winner_text = self.winner_black if player==1 else self.winner_white
+                    self.canvas.itemconfigure(winner_text, state=tk.NORMAL)
+                self.show_message(str(length) + ':' + str(record.n) + ',reward: ' + str(reward))
+                record.n += 1
+                self.replay_timer = threading.Timer(self.period, play_next_step)
+                self.replay_timer.start()
+            except StopIteration:
+                return
         threading.Timer(self.period, play_next_step).start()
 
     def select_record(self):
         f = filedialog.askopenfilename()
-        self.record_path.set(f)
-        self.record_entry.index(len(f)-10)
+        if f:
+            self.record_path.set(f)
+            self.record_entry.index(len(f)-10)
 
     def pause(self):
         if self.pause_text.get() == 'pause':

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import logging
 
 NOT_MOVE = 'NOT_MOVE'
 INVALID_MOVE = 'INVALID_MOVE'
@@ -30,17 +31,12 @@ def move(board, from_, to_):
     return _move(board, from_, to_)
 
 def _move(board, from_, to_):
-    # print('move from', from_, 'to', to_)
+    logging.debug('move from %s to %s', from_, to_)
     stone = board[from_]
     board[to_] = stone
     board[from_] = 0
-    is_win = judge_win_2(board, player=stone)
-    if is_win:
-        return WIN, []
     eat_stone = judge_eat(board, to_)
-    if len(eat_stone) > 0:
-        is_win = judge_win_1(board, player=stone)
-    return WIN if is_win else ACCQUIRE, eat_stone  # 判断是否吃子
+    return WIN if judge_win(board, player=stone, eat_stone=eat_stone) else ACCQUIRE, eat_stone
 
 def judge_eat(board, loc):
     """
@@ -82,33 +78,39 @@ def judge_eat_line(line, player):
         # 可以吃对手的子
         return opponent_stone_index[0]
 
+def judge_win(board, player, eat_stone):
+    return len(eat_stone) > 0 and judge_win_1(board, player=player) or \
+            judge_win_2(board, player=player)
+
 def judge_win_1(board, player):
     """
     对方棋子数少于2则胜
     """
     if (board==-player).sum() < 2:
-        return WIN
+        return True
 
 def judge_win_2(board, player):
     """
     对方无路可走则胜
     """
     if valid_location(board, -player).sum() == 0:
-        return WIN
+        return True
 
 def feature(board, player):
     """
     棋局的特征
     :param board:   棋盘
     :param player:  当前的棋手
-    :return:
+    :return: 当前局面的特征(5x5x10)
     """
-    space = (board==0).astype(np.int8)
-    black = (board==1).astype(np.int8)
-    white = (board==-1).astype(np.int8)
-    who = np.ones((5,5)) if player == 1 else np.zeros((5,5))
-    bias = np.ones((5,5))
-    return np.array([space, black, white, who, bias])
+    space = (board==0).astype(np.int8).reshape((5,5,1))
+    black = (board==1).astype(np.int8).reshape((5,5,1))
+    white = (board==-1).astype(np.int8).reshape((5,5,1))
+    who = np.ones((5,5,1)) if player == 1 else np.zeros((5,5,1))
+    v_locations = valid_location(board, player).reshape((5,5,1))
+    v_actions = valid_action(board, player)
+    bias = np.ones((5,5,1))
+    return np.concatenate((space, black, white, who, v_locations, v_actions, bias), axis=2)
 
 def valid_action(board, player):
     """
@@ -119,8 +121,27 @@ def valid_action(board, player):
         # stone: player棋子的位置
         neighbors = [np.add(stone, step) for step in actions_move]
         # print(stone, ': ', neighbors)
-        va = [1 if np.all(nb>=0) and np.all(nb<=4) and board[tuple(nb)]==0 else 0 for nb in neighbors]
-        v_actions[tuple(stone)] = va
+        # va = [1 if np.all(nb>=0) and np.all(nb<=4) and board[tuple(nb)]==0 else 0 for nb in neighbors]
+        # v_actions[tuple(stone)] = va
+        for i,nb in enumerate(neighbors):
+            if np.all(nb >= 0) and np.all(nb <= 4) and board[tuple(nb)] == 0:
+                v_actions[tuple(stone)][i] = 1
+    return v_actions
+
+def valid_action2(board, player):
+    """
+    棋子允许的动作
+    """
+    v_actions = np.zeros((4, 5, 5))
+    stones = np.argwhere(board == player)
+    # print('stones:', stones)
+    for i,step in enumerate(actions_move):
+        for stone in stones:
+            nb = stone + np.array(step)
+            # print('stone:', stone, 'nb:', nb)
+            v_actions[i][tuple(stone)] = 1 if np.all(nb>=0) and np.all(nb<=4) and board[tuple(nb)]==0 else 0
+        # print(v_actions[i])
+        # print('=' * 50)
     return v_actions
 
 def valid_location(board, player):
@@ -148,8 +169,10 @@ def _main():
     print('-' * 50)
     print(repr(valid_location(bd, 1)))
     print('-' * 50)
-    print(repr(valid_action(bd, player=1)))
-    # print(feature(bd, 1))
+    # print(repr(valid_action2(bd, player=1)))
+    f = feature(bd, 1)
+    print(f.shape)
+    print(f)
 
 if __name__ == '__main__':
     _main()

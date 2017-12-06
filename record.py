@@ -1,6 +1,8 @@
 import time
 import numpy as np
+import logging
 
+logger = logging.getLogger('app')
 
 class Record:
     """
@@ -10,18 +12,49 @@ class Record:
         self.gamma = gamma
         self.records = []
 
-    def add(self, board, from_, action, reward, win=False):
+    def add1(self, board, from_, action, reward, win=False):
+        if win and reward == 0:
+            reward = 1
         self.records.append([board, from_, action, reward])
-        player = board[from_]
+        # player = board[from_]
         if reward > 0:
-            for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]==player, reversed(self.records[:-1]))):
-                r[-1] += (reward * self.gamma ** (i + 1))
-            for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]!=player, reversed(self.records[:-1]))):
-                r[-1] -= (reward * self.gamma ** i)
+            # 将对手上一步的回报-reward
+            self.records[-2][-1] -= reward
+            # for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]==player, reversed(self.records[:-1]))):
+            #     r[-1] += (reward * self.gamma ** (i + 1))
+            # for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]!=player, reversed(self.records[:-1]))):
+            #     r[-1] -= (reward * self.gamma ** i)
         if win:
-            for record in self.records:
-                b, f, _, _ = record
-                record[-1] += 1 if b[f] == player else -1
+            # 赢棋时计算每一步的总回报
+            player_rewards = [[], [], []]
+            winner = board[from_]
+            for i,rc in enumerate(reversed(self.records)):
+                b, f_, a, r = rc
+                player = int(b[f_])
+                for j,rj in player_rewards[player]:
+                    rc[-1] += rj * self.gamma ** (i-j)
+                if r != 0:
+                    player_rewards[player].append((i,r))
+            # 将reward缩放为最大为1(-1)
+            max_reward = max(map(lambda rec:rec[-1], self.records))
+            min_reward = min(map(lambda rec:rec[-1], self.records))
+            logger.info('max_reward:%s, min_reward:%s', max_reward, min_reward)
+            for i, r in enumerate(filter(lambda rec: rec[0][rec[1]]==winner, self.records)):
+                r[-1] /= max_reward
+            for i, r in enumerate(filter(lambda rec: rec[0][rec[1]]!=winner, self.records)):
+                r[-1] /= np.abs(min_reward)
+
+        # if win:
+        #     for record in self.records:
+        #         b, f, _, _ = record
+        #         record[-1] += 1 if b[f] == player else -1
+
+    def add(self, board, from_, action, reward, win=False):
+        self.records.append([board, from_, action, 0])
+        if win:
+            winner = board[from_]
+            for rc in self.records:
+                rc[-1] = 1 if rc[0][rc[1]]==winner else 0
 
     def __iter__(self):
         return iter(self.records)
@@ -56,6 +89,9 @@ class Record:
                 self.records.append([board, from_, action, reward])
 
     def length(self):
+        return len(self.records)
+
+    def __len__(self):
         return len(self.records)
 
     def clear(self):

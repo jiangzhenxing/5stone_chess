@@ -1,6 +1,9 @@
-from policy_network import RolloutPolicyNetwork, ConvolutionPolicyNetwork
+from policy_network import PolicyNetwork, RolloutPolicyNetwork, ConvolutionPolicyNetwork
 import chess_rule as rule
 import numpy as np
+import logging
+
+logger = logging.getLogger('app')
 
 HUMMAN = 'HUMMAN'
 COMPUTER = 'COMPUTER'
@@ -38,14 +41,19 @@ class HummaPlayer(Player):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, type_=HUMMAN)
 
 
-class PolicyNetworkPlayer(Player):
-    def __init__(self, name, stone_val, signal, winner_text, clock, modelfile):
+class ComputerPlayer(Player):
+    def __init__(self, name, stone_val, signal, winner_text, clock):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, type_=COMPUTER)
-        self.policy = RolloutPolicyNetwork(modelfile)
+
+
+class PolicyNetworkPlayer(ComputerPlayer):
+    def __init__(self, name, stone_val, signal, winner_text, clock, modelfile):
+        ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock)
+        self.policy = PolicyNetwork.load(modelfile)
 
     def play(self, board):
-        print(self.name + ' play...')
-        from_, action = self.policy.predict(board, self.stone_val)
+        logger.info('%s play...', self.name)
+        from_, action = self.policy.policy(board, self.stone_val)
         to_ = tuple(np.add(from_, rule.actions_move[action]))
-        print(from_, to_)
+        logger.info('from %s to %s', from_, to_)
         return from_, to_
