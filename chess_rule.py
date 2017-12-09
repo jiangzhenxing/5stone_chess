@@ -112,6 +112,67 @@ def feature(board, player):
     bias = np.ones((5,5,1))
     return np.concatenate((space, black, white, who, v_locations, v_actions, bias), axis=2)
 
+def feature_1st(board, player):
+    """
+    第一视角的棋局特征
+    :param board:   棋盘
+    :param player:  当前的棋手
+    :return: 当前局面的特征(5x5xN)
+    """
+    space = (board==0).astype(np.int8).reshape((5,5,1))
+    self = (board==player).astype(np.int8).reshape((5,5,1))
+    opponent = (board==-player).astype(np.int8).reshape((5,5,1))
+    v_locations = valid_location(board, player).reshape((5,5,1))
+    v_actions = valid_action(board, player)
+    bias = np.ones((5,5,1))
+    return np.concatenate((space, self, opponent, v_locations, v_actions, bias), axis=2)
+
+def target(board, from_, action, reward, vp):
+    if vp[from_][action] == 1:
+        y = vp
+    else:
+        if reward > 0:
+            vp[from_][action] *= (1 + reward)
+        else:
+            vp[from_][action] /= (1 - reward)
+        s = vp.sum()
+        assert s > 0, 'sum is: %s, reward is: %s' % (s, reward)
+        y = vp / s
+    # if reward == 1:
+    #     y = np.zeros((5, 5, 4))
+    #     y[from_][action] = 1
+    # elif reward == 0:
+    #     if vp[from_][action] == 1:
+    #         y = vp
+    #     else:
+    #         vp[from_][action] = 0
+    #         y = vp / vp.sum()
+    # else:
+    #     raise ValueError('reward is: ' + str(reward))
+    return y
+
+def flip_board(board):
+    return np.fliplr(np.flipud(board))
+
+def flip_location(location):
+    i,j = location
+    return 4-i,4-j
+
+def flip_action_probs(p):
+    p = np.fliplr(np.flipud(p))
+    for i in range(5):
+        for j in range(5):
+            p[i,j] = np.concatenate((p[i,j][:2][::-1], p[i,j][2:][::-1]))
+    return p
+
+def flip_action(a):
+    """
+    将一个动作a进行左右/上下的颠倒
+    ['LEFT', 'RIGHT', 'UP', 'DOWN']
+    :param a:
+    """
+    return 1 - a if a < 2 else 5 - a
+
 def valid_action(board, player):
     """
     棋子允许的动作
@@ -160,19 +221,25 @@ def neighbor(location):
 
 
 def _main():
-    bd = np.zeros((5, 5))
-    bd[0, :] = -1
-    bd[4, 0] = 1
-    bd[4, 2] = 1
-    bd[3, 2] = 1
-    print(bd)
+    # bd = np.zeros((5, 5))
+    # bd[0, :] = -1
+    # bd[4, 0] = 1
+    # bd[4, 2] = 1
+    # bd[3, 2] = 1
+    # print(bd)
+    # print('-' * 50)
+    # print(repr(valid_location(bd, 1)))
+    # print('-' * 50)
+    # # print(repr(valid_action2(bd, player=1)))
+    # f = feature(bd, 1)
+    # print(f.shape)
+    # print(f)
+    # action = np.arange(4)
+    # print(flip_action(action))
+    p = np.arange(100).reshape(5,5,4) / 100
+    print(p)
     print('-' * 50)
-    print(repr(valid_location(bd, 1)))
-    print('-' * 50)
-    # print(repr(valid_action2(bd, player=1)))
-    f = feature(bd, 1)
-    print(f.shape)
-    print(f)
+    print(flip_action_probs(p))
 
 if __name__ == '__main__':
     _main()

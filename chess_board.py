@@ -38,6 +38,9 @@ class ChessBoard:
         # 棋子
         self._stone = [[None for _ in range(col)] for _ in range(row)]
 
+        # Q值
+        self._qtext = [[[canvas.create_text(*(np.array([w * (j + 1), w * (i + 1)]) + np.array(a)[::-1] * 25), text='', fill='green') for a in rule.actions_move] for j in range(5)] for i in range(5)]
+
         # 棋手的名字
         self.name_white = canvas.create_text(40, 30, text=WHITE, fill='#EEE', font=font.Font(size=20))
         self.name_black = canvas.create_text(40, w*6-30, text=BLACK, fill='#111', font=font.Font(size=20))
@@ -113,7 +116,7 @@ class ChessBoard:
         self.clear()
         self.init_stone()
 
-        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/convolution_policy_network_001.model')
+        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/convolution_policy_network_1000.model')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
 
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
@@ -141,9 +144,12 @@ class ChessBoard:
         logger.info('%s play...', self.current_player)
         if self.current_player.is_humman():
             return
+        board = self.board()
+        from_, to_, vp, p = self.current_player.play(board)
+        valid_action = rule.valid_action(board, self.current_player.stone_val)
+        self.show_qtext(p, valid_action)
+        stone = self.stone(from_)
         def _play():
-            from_,to_ = self.current_player.play(self.board())
-            stone = self.stone(from_)
             result = self.move_to(stone, to_)
             if result == rule.ACCQUIRE:
                 self.switch_player_and_play()
@@ -151,6 +157,28 @@ class ChessBoard:
                 logger.info('GAME OVER, WINNER IS %s', stone.player.name)
                 self.game_over(stone.player)
         self.play_timer = self.window.after(int(self.period * 1000), _play)
+
+    def show_qtext(self, qtable, valid_action):
+        maxq = np.max(qtable)
+        avgq = qtable.sum() / valid_action.sum()
+        idx = np.argwhere(valid_action == 1)
+        for i,j,k in idx:
+            q = qtable[i,j,k]
+            qtext = self.qtext(i,j,k)
+            stone = self.stone((i,j))
+            self.canvas.itemconfigure(qtext, text=str(round(q,2)).replace('0.', '.'), fill='red' if q==maxq else ('#FF00FF' if q > avgq else 'green'), state=tk.NORMAL)
+            self.canvas.tag_raise(qtext, stone.oval)
+        self.hide_qtext(valid_action)
+
+    def hide_qtext(self, valid_action=None):
+        if valid_action is None:
+            valid_action = np.zeros((5,5,4))
+        idx = np.argwhere(valid_action == 0)
+        for i,j,k in idx:
+            self.canvas.itemconfigure(self.qtext(i,j,k), text='', state=tk.HIDDEN)
+
+    def qtext(self, i, j, k):
+        return self._qtext[i][j][k]
 
     def clear(self):
         for board_row in self._stone:
@@ -165,6 +193,7 @@ class ChessBoard:
             self.replay_timer.cancel()
         self.hide_signal()
         self.hide_winner()
+        self.hide_qtext()
         self.start_btn_text.set('start')
         self.pause_text.set('pause')
         self.show_message('')
@@ -299,7 +328,7 @@ class ChessBoard:
             logger.info('from %s to %s, result:%s, del:%s', from_, to_loc, result, del_stone_loc)
             action = rule.actions_move.index(tuple(np.subtract(to_loc, from_)))
             logger.debug('action is: %s', action)
-            self.record.add(old_board, from_, action, len(del_stone_loc), win=(result==rule.WIN))
+            self.record.add(old_board, from_, action, len(del_stone_loc), None, win=(result==rule.WIN))
         return result
 
     def replay(self):
@@ -319,9 +348,9 @@ class ChessBoard:
             self.event.wait()
             try:
                 board, from_, action, reward = next(record_iter)
-                assert (board == self.board()).all(), str(board) + '\n' + str(self.board())
                 player = board[from_]
                 to_ = tuple(np.add(from_, rule.actions_move[action]))
+                assert (board == self.board()).all(), str(board) + '\n' + str(self.board())
                 result = self.move_to(self.stone(from_), to_)
                 if result == rule.WIN:
                     winner_text = self.winner_black if player==1 else self.winner_white
@@ -332,7 +361,9 @@ class ChessBoard:
                 self.replay_timer.start()
             except StopIteration:
                 return
-        threading.Timer(self.period, play_next_step).start()
+        self.replay_timer = threading.Timer(self.period, play_next_step)
+        self.replay_timer.start()
+
 
     def select_record(self):
         f = filedialog.askopenfilename()

@@ -49,11 +49,25 @@ class ComputerPlayer(Player):
 class PolicyNetworkPlayer(ComputerPlayer):
     def __init__(self, name, stone_val, signal, winner_text, clock, modelfile):
         ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock)
-        self.policy = PolicyNetwork.load(modelfile)
+        self.model = PolicyNetwork.load(modelfile)
+
+    def play0(self, board):
+        logger.info('%s play...', self.name)
+        from_, action, vp, p = self.model.policy(board, self.stone_val)
+        to_ = tuple(np.add(from_, rule.actions_move[action]))
+        logger.info('from %s to %s', from_, to_)
+        return from_, to_, vp, p
 
     def play(self, board):
         logger.info('%s play...', self.name)
-        from_, action = self.policy.policy(board, self.stone_val)
+        if self.stone_val == -1:
+            board = rule.flip_board(board)
+        from_, action, vp, p = self.model.policy_1st(board, self.stone_val)
         to_ = tuple(np.add(from_, rule.actions_move[action]))
+        if self.stone_val == -1:
+            from_ = rule.flip_location(from_)
+            to_ = rule.flip_location(to_)
+            vp = rule.flip_action_probs(vp)
+            p = rule.flip_action_probs(p)
         logger.info('from %s to %s', from_, to_)
-        return from_, to_
+        return from_, to_, vp, p

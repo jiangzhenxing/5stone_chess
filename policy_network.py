@@ -22,7 +22,8 @@ class PolicyNetwork:
         # 跟踪上一步的值，供调试
         self.p = None
         self.valid = None
-        self.r = None
+        self.vp = None
+        self.ntrain = 0 # 第几次训练
 
     @staticmethod
     def load(modelfile):
@@ -55,37 +56,37 @@ class PolicyNetwork:
         x = np.array([x])
         p = self.model.predict(x)[0]
         p = p.reshape(5,5,4)
-        r = p * valid   # 所有可能走法的概率
+        vp = p * valid   # 所有可能走法的概率
         board_str = ''.join(map(str, board.flatten()))
 
         try:
-            logging.info('最大概率:%.2f:%s(%.2f):%s, 和:%.2f, 平均:%.2f', np.max(r), np.argmax(r), np.max(p), np.argmax(p), r.sum(), r.sum()/valid.sum())
-            if np.max(r) == 0:
+            logging.info('最大概率:%.2f:%s(%.2f):%s, 和:%.2f, 平均:%.2f', np.max(vp), np.argmax(vp), np.max(p), np.argmax(p), vp.sum(), vp.sum()/valid.sum())
+            if np.max(vp) == 0:
                 # 最大概率为0，随机选择
                 logging.info('>> max prob is 0 random choise...')
                 valid_index = np.argwhere(valid==1)
                 assert len(valid_index) > 0, 'no valid action'
                 row, col, action = valid_index[np.random.randint(len(valid_index))]
                 self.predicts.add((board_str, row, col, action))
-                self.set_pre(p, valid, r)
+                self.set_pre(p, valid, vp)
                 return (row, col), action
             check = True
             while True:
-                if np.max(r) == 0:
+                if np.max(vp) == 0:
                     # 如果最大值是0，说明所有步法之前已经走过，重新取最大概率步
                     logging.info('>> max prob is 0, rechoise')
-                    r = p * valid
+                    vp = p * valid
                     check = False
                 # 选择最大概率
-                mx = np.max(r)  # 最大概率
-                mx_index = np.argwhere(r == mx)  # 所有最大概率的位置
+                mx = np.max(vp)  # 最大概率
+                mx_index = np.argwhere(vp == mx)  # 所有最大概率的位置
                 row, col, action = mx_index[np.random.randint(len(mx_index))]  # 从最大概率的动作中随机选择
                 if check and (board_str,row,col,action) in self.predicts:
                     # 如果此步已经走过了，将其概率置为0，重新选择
-                    r[row,col,action] = 0
+                    vp[row,col,action] = 0
                 else:
                     self.predicts.add((board_str,row,col,action))
-                    self.set_pre(p, valid, r)
+                    self.set_pre(p, valid, vp)
                     return (row,col),action
         except Exception as e:
             logging.info('board:')
@@ -96,13 +97,13 @@ class PolicyNetwork:
             logging.info('valid action is:')
             logging.info(valid)
             logging.info('-' * 50)
-            logging.info('r is:')
-            logging.info(r)
+            logging.info('vp is:')
+            logging.info(vp)
             logging.info('-' * 50)
             raise e
 
     @staticmethod
-    def action_by_prob(actions, probs):
+    def select_by_prob(actions, probs):
         # logging.debug(actions)
         # logging.debug(probs)
         rd = np.random.rand()
@@ -122,45 +123,58 @@ class PolicyNetwork:
         # for l in self.model.layers:
         #     logger.info('layer %s, output shape: %s', l, l.output_shape)
         p = p.reshape(5, 5, 4)
-        r = p * valid  # 所有可能走法的概率
-        self.set_pre(p, valid, r)
+        vp = p * valid  # 所有可能走法的概率
+        self.set_pre(p, valid, vp)
         board_str = ''.join(map(str, board.flatten()))
         try:
-            maxr = np.max(r)
-            maxp = np.max(p)
-            logging.info('最大概率:%.4f(%s)_%.4f(%s), 和:%.4f, 平均:%.4f',
-                         maxr, ','.join(map(str,np.argwhere(r==maxr)[0])),
-                         maxp, ','.join(map(str,np.argwhere(p==maxp)[0])),
-                         r.sum(), r.sum()/valid.sum())
+            max_vp = np.max(vp)
+            if self.ntrain % 10 == 0:
+                max_vp_ = max_vp
+                maxp = np.max(p)
+                max_vp_where = np.argwhere(vp==max_vp)[0]
+                maxp_where = np.argwhere(p==maxp)[0]
+                vp_sum = vp.sum()
+                avgp = vp_sum / valid.sum()
             n = 0
+            max_valid_prob_is0 = max_vp == 0
+            if max_valid_prob_is0:
+                # 最大概率为0，概率定为平均值，随机选择
+                n_valid = valid.sum()
+                assert n_valid > 0, 'no valid action'
+                vp = valid / n_valid
+                max_vp = 1 / n_valid
+                # logging.info('>> max prob is 0 radom choise...')
+                # valid_index = np.argwhere(valid == 1)
+                # assert len(valid_index) > 0, 'no valid action'
+                # row, col, action = valid_index[np.random.randint(len(valid_index))]
+                # self.predicts.add((board_str, row, col, action))
+                # self.set_pre(p, valid, r)
+                # return (row, col), action, vp
             check = True
-            if maxr == 0:
-                # 最大概率为0，随机选择
-                logging.info('>> max prob is 0 radom choise...')
-                valid_index = np.argwhere(valid == 1)
-                assert len(valid_index) > 0, 'no valid action'
-                row, col, action = valid_index[np.random.randint(len(valid_index))]
-                self.predicts.add((board_str, row, col, action))
-                self.set_pre(p, valid, r)
-                return (row, col), action
             while True:
-                if np.max(r) == 0:
+                if max_vp == 0:
                     # 最大概率为0，说明所有的步法之前均已走过，重新按概率选择
                     logging.info('>> max prob is 0 rechoise by prob...')
-                    r = p * valid
+                    vp = p * valid if not max_valid_prob_is0 else valid / valid.sum()
                     check = False
                 # 按概率选择
-                r = r / r.sum()
-                idx = np.argwhere(r > 0)
-                prob = [r[tuple(i)] for i in idx]
-                row,col,action = self.action_by_prob(idx, prob)
+                vp = vp / vp.sum()
+                idx = np.argwhere(vp > 0)
+                prob = [vp[tuple(i)] for i in idx]
+                row,col,action = self.select_by_prob(idx, prob)
                 if check and (board_str,row,col,action) in self.predicts:
-                    r[row, col, action] = 0
+                    vp[row, col, action] = 0
                 else:
                     self.predicts.add((board_str, row, col, action))
-                    return (row, col), action
+                    if self.ntrain % 10 == 0:
+                        logging.info('最大概率:%.4f(%s)_%.4f(%s), 和:%.4f, 平均:%.4f, select: %s,%s,%s',
+                                     max_vp_, ','.join(map(str, max_vp_where)),
+                                     maxp, ','.join(map(str, maxp_where)),
+                                     vp_sum, avgp, row, col, action)
+                    return (row, col), action, vp, p
                 if n > 100:
                     logging.info('!select: %s, %s, %s, %s', n, (row, col, action), idx, prob)
+                max_vp = np.max(vp)
                 n +=1
         except Exception as e:
             logging.info('board:')
@@ -171,17 +185,17 @@ class PolicyNetwork:
             logging.info('valid action is:')
             logging.info(valid)
             logging.info('-' * 50)
-            logging.info('r is:')
-            logging.info(r)
+            logging.info('vp is:')
+            logging.info(vp)
             logging.info('-' * 50)
             for l in self.model.layers:
                 logger.info('%s weights: %s\n', l, l.get_weights())
             raise e
 
-    def set_pre(self, p, valid, r):
+    def set_pre(self, p, valid, vp):
         self.p = p
         self.valid = valid
-        self.r = r
+        self.vp = vp
 
     def copy(self, other):
         self.model.set_weights(other.model.get_weights())
@@ -240,12 +254,13 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
         model.add(Convolution2D(
             filters = 50,           # 卷积核/滤波器个数
             kernel_size = 3,        # 卷积窗口大小
-            input_shape = (5,5,10), # 输入平面的形状
+            input_shape = (5,5,9), # 输入平面的形状
             strides = 1,            # 步长
             padding = 'same',       # padding方式 same:保持图大小不变/valid
             activation = 'relu',    # 激活函数
             use_bias=False,
-            kernel_regularizer=l2(l)
+            kernel_regularizer=l2(l),
+            # bias_regularizer=l2(l)
         ))
         def create_conv_layer(filters=50, kernel_size=3,):
             return Convolution2D(filters,
@@ -254,7 +269,9 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
                                  padding = 'same',
                                  activation = 'relu',
                                  use_bias = False,
-                                 kernel_regularizer = l2(l))
+                                 kernel_regularizer = l2(l),
+                                 # bias_regularizer=l2(l)
+                                 )
         # 第二个卷积层
         model.add(create_conv_layer())
         # 第三个卷积层
@@ -291,28 +308,33 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
     def get_layer(self, name):
         return self.model.get_layer(name)
 
-    def train(self, records, batch_size=1, epochs=5, verbose=0):
+    def train(self, records, batch_size=1, epochs=1, verbose=0):
         x_train = []
         y_train = []
-        for bd, from_, action, reward in records:
+        for bd, from_, action, reward, vp in records:
             player = bd[from_]
-            x = rule.feature(bd, player)
-            y = np.zeros((5, 5, 4))
-            y[from_][action] = reward
+            x = rule.feature_1st(bd, player)
             x_train.append(x)
+            y = rule.target(bd, from_, action, reward, vp)
             y_train.append(y.flatten())
         self.set_dropout(0.5)
         self._train(np.array(x_train, copy=False), np.array(y_train, copy=False), batch_size=batch_size, epochs=epochs, verbose=verbose)
         # logger.info('weights: %s', self.model.get_weights())
 
     def predict(self, board, player):
-        x = rule.feature(board, player)
+        x = rule.feature_1st(board, player)
         valid = rule.valid_action(board, player)
         self.set_dropout(0)
         return self._predict(x, board, valid)
 
     def policy(self, board, player):
         x = rule.feature(board, player)
+        valid = rule.valid_action(board, player)
+        self.set_dropout(0)
+        return self._policy(x, board, valid)
+
+    def policy_1st(self, board, player):
+        x = rule.feature_1st(board, player)
         valid = rule.valid_action(board, player)
         self.set_dropout(0)
         return self._policy(x, board, valid)
@@ -352,15 +374,15 @@ def simulate(nw0, nw1):
     records = Record()
     while True:
         nw = nw0 if player == 1 else nw1
-        bd = board.copy()
         try:
-            from_, action = nw.policy(board, player)
+            bd = board.copy()
+            from_, action, vp, p = nw.policy(board, player)
             # print('>', from_, action)
             assert board[from_] == player
             to_ = tuple(np.add(from_, rule.actions_move[action]))
             command,eat = rule.move(board, from_, to_)
             reward = len(eat)
-            records.add(bd, from_, action, reward, win=command==rule.WIN)
+            records.add(bd, from_, action, reward, vp, win=command==rule.WIN)
         except Exception as e:
             logging.info('board is:')
             logging.info(board)
@@ -375,7 +397,7 @@ def simulate(nw0, nw1):
             logging.info(nw.r)
             logging.info('from:%s, action:%s', from_, action)
             logging.info('prob is: %s', valid[from_][action])
-            records.save('records/train/')
+            records.save('records/train/1st_')
             raise e
         # if eat:
         #     print(player, from_, to_, eat, N)
@@ -386,10 +408,14 @@ def simulate(nw0, nw1):
             logging.info('走子数过多: %s', records.length())
             return Record(''),0
         player = -player
+        board = rule.flip_board(board)
 
 @print_use_time()
 def train(n0, n1, i):
     logging.info('train: %d', i)
+    n0.ntrain += 1
+    n1.ntrain += 1
+
     records, winner = simulate(n0, n1)
     n0.clear()
     n1.clear()
@@ -397,13 +423,13 @@ def train(n0, n1, i):
     if records.length() == 0:
         return
 
-    if i%50==0:
-        records.save('records/train/')
+    if i%200==0:
+        records.save('records/train/1st_')
 
     n1.copy(n0)
-    n0.train(records)
+    n0.train(records, epochs=1)
 
-def _main():
+def train_rpn():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train'])
     n0 = RolloutPolicyNetwork('model/policy_network3_075.model0')
@@ -415,16 +441,16 @@ def _main():
         if i % 100 == 0:
             n0.save_model('model/rollout_policy_network3_%03d.model0' % (i // 100))
 
-def _main2():
+def train_cpn():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train'])
     n0 = ConvolutionPolicyNetwork()
     n1 = ConvolutionPolicyNetwork()
     n1.copy(n0)
-    episode = 10000
+    episode = 100000
     for i in range(1,episode+1,1):
         train(n0, n1, i)
-        if i % 100 == 0:
+        if i % 200 == 0:
             n0.save_model('model/convolution_policy_network_%03d.model' % (i // 100))
 
 
@@ -432,4 +458,4 @@ if __name__ == '__main__':
     import logging.config
     logging.config.fileConfig('logging.conf')
     # _main()
-    _main2()
+    train_cpn()
