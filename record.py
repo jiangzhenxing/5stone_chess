@@ -14,11 +14,34 @@ class Record:
         self.records = []
 
     def add(self, board, from_, action, reward, vp, win=False):
+        """
+        只有吃子有回报，没有赢了的额外奖励
+        """
         if win and reward == 0:
             reward = 1
         self.records.append([board, from_, action, reward, vp])
         # player = board[from_]
-        if reward > 0:
+        if reward > 0 and len(self.records) > 1:
+            # 将对手上一步的回报-reward
+            self.records[-2][3] -= reward
+        if win:
+            # 赢棋时计算每一步的总回报
+            player_rewards = [0, 0, 0]
+            for i,rc in enumerate(reversed(self.records)):
+                b, f_, a, r, _ = rc
+                player = int(b[f_])
+                rc[3] += player_rewards[player] * self.gamma
+                player_rewards[player] = rc[3]
+
+    def add1(self, board, from_, action, reward, vp, win=False):
+        """
+        吃子有回报，赢了有额外奖励
+        """
+        if win and reward == 0:
+            reward = 1
+        self.records.append([board, from_, action, reward, vp])
+        # player = board[from_]
+        if reward > 0 and len(self.records) > 1:
             # 将对手上一步的回报-reward
             self.records[-2][3] -= reward
             # for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]==player, reversed(self.records[:-1]))):
@@ -48,6 +71,9 @@ class Record:
                 record[3] += 1 if b[f_] == winner else -1
 
     def add2(self, board, from_, action, reward, vp, win=False):
+        """
+        只有赢/输的奖励
+        """
         self.records.append([board, from_, action, 0, vp])
         if win:
             winner = board[from_]

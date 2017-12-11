@@ -258,9 +258,8 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
             strides = 1,            # 步长
             padding = 'same',       # padding方式 same:保持图大小不变/valid
             activation = 'relu',    # 激活函数
-            use_bias=False,
-            kernel_regularizer=l2(l),
-            # bias_regularizer=l2(l)
+            kernel_regularizer = l2(l),
+            bias_regularizer = l2(l)
         ))
         def create_conv_layer(filters=50, kernel_size=3,):
             return Convolution2D(filters,
@@ -268,9 +267,8 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
                                  strides = 1,
                                  padding = 'same',
                                  activation = 'relu',
-                                 use_bias = False,
                                  kernel_regularizer = l2(l),
-                                 # bias_regularizer=l2(l)
+                                 bias_regularizer=l2(l)
                                  )
         # 第二个卷积层
         model.add(create_conv_layer())
@@ -289,13 +287,13 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
                         activation='softmax',
                         kernel_initializer='zeros',
                         kernel_regularizer=l2(l),
-                        use_bias=False,
-                        # bias_initializer='zeros', bias_regularizer=l2(l)))
+                        bias_initializer='zeros',
+                        bias_regularizer=l2(l)
                         ))
 
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD(lr=1e-3)
+        opt = SGD(lr=5e-4)
         # 定义优化器，loss function
         model.compile(optimizer=opt, loss='categorical_crossentropy')
         return model
@@ -328,7 +326,7 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
         return self._predict(x, board, valid)
 
     def policy(self, board, player):
-        x = rule.feature(board, player)
+        x = rule.feature_1st(board, player)
         valid = rule.valid_action(board, player)
         self.set_dropout(0)
         return self._policy(x, board, valid)
@@ -365,11 +363,34 @@ class SoftmaxLayer(Layer):
     def compute_output_shape(self, input_shape):
         return (-1,*self.output_dim)
 
+def random_init_board():
+    """
+    随机初始化棋盘
+    """
+    board = np.zeros((5, 5))
+    def random_init_stone(stone):
+        num = np.random.randint(2, 6)  # 棋子数量 2-5
+        logger.info('%s num is %s', stone, num)
+        for _ in range(num):
+            while True:
+                idx = np.random.randint(25)
+                pos = (idx // 5, idx % 5)
+                if board[pos] == 0:
+                    board[pos] = stone
+                    break
+    random_init_stone(1)
+    random_init_stone(-1)
+    return board
+
+def init_board():
+    board = np.zeros((5, 5))
+    board[0, :] = -1
+    board[4, :] = 1
+    return board
+
 @print_use_time()
 def simulate(nw0, nw1):
-    board = np.zeros((5, 5))
-    board[0,:] = -1
-    board[4,:] = 1
+    board = random_init_board()
     player = 1
     records = Record()
     while True:
@@ -394,7 +415,7 @@ def simulate(nw0, nw1):
             logging.info('valid action is:')
             logging.info(nw.valid)
             logging.info('p * valid is:')
-            logging.info(nw.r)
+            logging.info(nw.vp)
             logging.info('from:%s, action:%s', from_, action)
             logging.info('prob is: %s', valid[from_][action])
             records.save('records/train/1st_')
@@ -447,8 +468,8 @@ def train_cpn():
     n0 = ConvolutionPolicyNetwork()
     n1 = ConvolutionPolicyNetwork()
     n1.copy(n0)
-    episode = 100000
-    for i in range(1,episode+1,1):
+    episode = 300000
+    for i in range(episode, episode+episode,1):
         train(n0, n1, i)
         if i % 200 == 0:
             n0.save_model('model/convolution_policy_network_%03d.model' % (i // 100))

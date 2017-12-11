@@ -102,6 +102,7 @@ class ChessBoard:
         self.replay_timer = None
         self.winner = None
         self.ended = False
+        self.action_select_signal = None
         self.start_btn_text = start_btn_text
         self.record_path = record_path
         self.record_entry = record_entry
@@ -116,7 +117,7 @@ class ChessBoard:
         self.clear()
         self.init_stone()
 
-        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/convolution_policy_network_1000.model')
+        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_24/convolution_policy_network_2202.model')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
 
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
@@ -148,6 +149,7 @@ class ChessBoard:
         from_, to_, vp, p = self.current_player.play(board)
         valid_action = rule.valid_action(board, self.current_player.stone_val)
         self.show_qtext(p, valid_action)
+        self.show_select(from_, to_)
         stone = self.stone(from_)
         def _play():
             result = self.move_to(stone, to_)
@@ -158,7 +160,30 @@ class ChessBoard:
                 self.game_over(stone.player)
         self.play_timer = self.window.after(int(self.period * 1000), _play)
 
+    def show_select(self, from_, to_):
+        """
+        显示选择的动作
+        """
+        self.hide_select()
+        a = np.subtract(to_, from_)
+        logger.info('select action is: %s', a)
+        i,j = from_
+        x,y = np.array([self.w * (j + 1), self.w * (i + 1)]) + np.array(a)[::-1] * 25
+        self.action_select_signal = self.create_oval(x, y, r=12, outline='#FFB90F', width=2)
+
+    def hide_select(self):
+        """
+        隐藏选择的动作
+        """
+        self.canvas.delete(self.action_select_signal)
+
+    def create_oval(self, x, y, r, **config):
+        return self.canvas.create_oval(x - r, y - r, x + r, y + r, **config)
+
     def show_qtext(self, qtable, valid_action):
+        """
+        显示动作的Q值
+        """
         maxq = np.max(qtable)
         avgq = qtable.sum() / valid_action.sum()
         idx = np.argwhere(valid_action == 1)
@@ -166,11 +191,14 @@ class ChessBoard:
             q = qtable[i,j,k]
             qtext = self.qtext(i,j,k)
             stone = self.stone((i,j))
-            self.canvas.itemconfigure(qtext, text=str(round(q,2)).replace('0.', '.'), fill='red' if q==maxq else ('#FF00FF' if q > avgq else 'green'), state=tk.NORMAL)
+            self.canvas.itemconfigure(qtext, text=str(round(q,2)).replace('0.', '.'), fill='red' if q==maxq else ('#BF3EFF' if q > avgq else 'green'), state=tk.NORMAL)
             self.canvas.tag_raise(qtext, stone.oval)
         self.hide_qtext(valid_action)
 
     def hide_qtext(self, valid_action=None):
+        """
+        隐藏动作的Q值
+        """
         if valid_action is None:
             valid_action = np.zeros((5,5,4))
         idx = np.argwhere(valid_action == 0)
@@ -194,6 +222,7 @@ class ChessBoard:
         self.hide_signal()
         self.hide_winner()
         self.hide_qtext()
+        self.hide_select()
         self.start_btn_text.set('start')
         self.pause_text.set('pause')
         self.show_message('')
@@ -208,8 +237,8 @@ class ChessBoard:
 
     def init_stone(self):
         stone, canvas, w, r, row, col = self._stone, self.canvas, self.w, self.r, self.row, self.col
-        white = [Stone((0, j), canvas.create_oval(w * (j + 1) - r, w - r, w * (j + 1) + r, w + r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE) for j in range(col)]
-        black = [Stone((4, j), canvas.create_oval(w * (j + 1) - r, w * row - r, w * (j + 1) + r, w * row + r, fill='#111', outline='#111'), value=BLACK_VALUE) for j in range(col)]
+        white = [Stone((0, j), self.create_oval(w * (j + 1), w, r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE) for j in range(col)]
+        black = [Stone((4, j), self.create_oval(w * (j + 1), w * row, r, fill='#111', outline='#111'), value=BLACK_VALUE) for j in range(col)]
         stone[0] = white
         stone[row - 1] = black
 
