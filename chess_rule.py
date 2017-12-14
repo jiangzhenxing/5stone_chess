@@ -205,6 +205,25 @@ def valid_action2(board, player):
         # print('=' * 50)
     return v_actions
 
+def valid_action_by_location(board, player):
+    """
+    棋子允许的动作
+    以[(from,to)]的形式表达
+    """
+    stones = np.argwhere(board == player)
+    return [(tuple(stone),nb) for stone in stones for nb in neighbor(stone) if board[nb]==0]
+
+def valid_actions(board, player):
+    """
+    棋子允许的动作
+    以[(from,action)]的形式表达
+    """
+    stones = np.argwhere(board == player)
+    def valid(location):
+        i,j = location
+        return (0 <= i <=4) and (0 <= j <=4) and board[i,j]==0
+    return [(tuple(stone),idx) for stone in stones for idx,action in enumerate(actions_move) if valid(np.add(stone,action))]
+
 def valid_location(board, player):
     """
     棋手允许走的位置
@@ -217,17 +236,21 @@ def valid_location(board, player):
     return locations
 
 def neighbor(location):
+    """
+    location的邻近位置
+    """
     return map(lambda loc: tuple(loc), filter(lambda loc: np.all(loc>=0) and np.all(loc<=4), map(lambda action: np.add(location,action), actions_move)))
 
 
 def _main():
-    # bd = np.zeros((5, 5))
-    # bd[0, :] = -1
-    # bd[4, 0] = 1
-    # bd[4, 2] = 1
-    # bd[3, 2] = 1
-    # print(bd)
-    # print('-' * 50)
+    bd = np.zeros((5, 5))
+    bd[0, :] = -1
+    bd[4, 0] = 1
+    bd[4, 2] = 1
+    bd[3, 2] = 1
+    print(bd)
+    print('-' * 50)
+    print(valid_actions(bd, player=1))
     # print(repr(valid_location(bd, 1)))
     # print('-' * 50)
     # # print(repr(valid_action2(bd, player=1)))
@@ -236,10 +259,10 @@ def _main():
     # print(f)
     # action = np.arange(4)
     # print(flip_action(action))
-    p = np.arange(100).reshape(5,5,4) / 100
-    print(p)
-    print('-' * 50)
-    print(flip_action_probs(p))
+    # p = np.arange(100).reshape(5,5,4) / 100
+    # print(p)
+    # print('-' * 50)
+    # print(flip_action_probs(p))
 
 if __name__ == '__main__':
     _main()

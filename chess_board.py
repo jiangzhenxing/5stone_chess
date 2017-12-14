@@ -6,7 +6,7 @@ import chess_rule as rule
 from tkinter import font
 from tkinter import messagebox
 from tkinter import filedialog
-from player import HummaPlayer, PolicyNetworkPlayer
+from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer
 from record import Record
 import logging
 
@@ -16,6 +16,16 @@ BLACK = 'BLACK'
 WHITE = 'WHITE'
 BLACK_VALUE = 1
 WHITE_VALUE = -1
+
+
+class Stone:
+    def __init__(self, loc, oval, value, player=None):
+        self.loc = loc
+        self.oval = oval
+        self.value = value
+        self.player = player
+
+Stone.NONE = Stone(None,None,None)
 
 class ChessBoard:
     def __init__(self):
@@ -117,15 +127,16 @@ class ChessBoard:
         self.clear()
         self.init_stone()
 
-        white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_24/convolution_policy_network_2202.model')
+        # white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_149/convolution_policy_network_5995.model')
+        white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model/DQN_0010.model')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
 
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
         # black_player = PolicyNetworkPlayer('PIG', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, modelfile='model/policy_network_005.model')
-        for stone in self._stone[0]:
-            stone.player = white_player
-        for stone in self._stone[4]:
-            stone.player = black_player
+        for row in self._stone:
+            for stone in row:
+                if stone is not None:
+                    stone.player = white_player if stone.value == WHITE_VALUE else black_player
         self.black_player = black_player
         self.white_player = white_player
         self.canvas.itemconfigure(self.name_white, text=white_player.name)
@@ -146,7 +157,7 @@ class ChessBoard:
         if self.current_player.is_humman():
             return
         board = self.board()
-        from_, to_, vp, p = self.current_player.play(board)
+        from_, to_, p = self.current_player.play(board)
         valid_action = rule.valid_action(board, self.current_player.stone_val)
         self.show_qtext(p, valid_action)
         self.show_select(from_, to_)
@@ -235,12 +246,19 @@ class ChessBoard:
         self.ended = False
         self.record.clear()
 
-    def init_stone(self):
+    def init_stone(self, board=None):
+        if board is None:
+            board = np.zeros((5,5))
+            board[0,:] = -1
+            board[4,:] = 1
+        logger.info('init board is: \n%s', board)
         stone, canvas, w, r, row, col = self._stone, self.canvas, self.w, self.r, self.row, self.col
-        white = [Stone((0, j), self.create_oval(w * (j + 1), w, r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE) for j in range(col)]
-        black = [Stone((4, j), self.create_oval(w * (j + 1), w * row, r, fill='#111', outline='#111'), value=BLACK_VALUE) for j in range(col)]
-        stone[0] = white
-        stone[row - 1] = black
+        for i,j in np.argwhere(board == WHITE_VALUE):
+            logger.info('white pos: (%s,%s)', i, j)
+            self.stone((i,j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE))
+        for i, j in np.argwhere(board == BLACK_VALUE):
+            logger.info('black pos: (%s,%s)', i, j)
+            self.stone((i, j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#111', outline='#111'), value=BLACK_VALUE))
 
     def show_signal(self):
         self.canvas.itemconfigure(self.current_player.signal, state=tk.NORMAL)
@@ -366,12 +384,13 @@ class ChessBoard:
             self.show_message(message='请点击"open"按扭选择棋谱位置')
             return
         self.clear()
-        self.init_stone()
         self.event.set()
         record = Record()
         record.read(recordpath)
+        board = record[0][0]
+        self.init_stone(board)
         record_iter = iter(record)
-        length = record.length()
+        length = len(record)
         record.n = 1
         def play_next_step():
             self.event.wait()
@@ -392,7 +411,6 @@ class ChessBoard:
                 return
         self.replay_timer = threading.Timer(self.period, play_next_step)
         self.replay_timer.start()
-
 
     def select_record(self):
         f = filedialog.askopenfilename()
@@ -432,16 +450,13 @@ class ChessBoard:
     def move_to_pos(self, stone, x, y):
         self.canvas.coords(stone.oval, x - self.r, y - self.r, x + self.r, y + self.r)
 
-    def stone(self, loc, value='NOVAL'):
+    def stone(self, loc, value=Stone.NONE):
         i,j = loc
-        if value == 'NOVAL':
-            return self._stone[i][j]
-        elif value is None:
-            self._stone[i][j] = None
-        else:
+        if value != Stone.NONE:
             self._stone[i][j] = value
-            value.loc = loc
-            return value
+            if value is not None:
+                value.loc = loc
+        return self._stone[i][j]
 
     def pos_to_loc(self, x, y):
         i = int(y / self.w - 0.5)
@@ -453,9 +468,3 @@ class ChessBoard:
     def launch():
         tk.mainloop()
 
-class Stone:
-    def __init__(self, loc, oval, value, player=None):
-        self.loc = loc
-        self.oval = oval
-        self.value = value
-        self.player = player

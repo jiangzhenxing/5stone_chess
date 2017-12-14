@@ -8,9 +8,11 @@ from util import add_print_time_fun, print_use_time
 from record import Record
 import logging
 
-import keras.initializers
-
 logger = logging.getLogger('train')
+
+class NoActionException(BaseException):
+    pass
+
 
 class PolicyNetwork:
     def __init__(self, filepath=None):
@@ -140,7 +142,8 @@ class PolicyNetwork:
             if max_valid_prob_is0:
                 # 最大概率为0，概率定为平均值，随机选择
                 n_valid = valid.sum()
-                assert n_valid > 0, 'no valid action'
+                if n_valid == 0:
+                    raise NoActionException
                 vp = valid / n_valid
                 max_vp = 1 / n_valid
                 # logging.info('>> max prob is 0 radom choise...')
@@ -404,6 +407,8 @@ def simulate(nw0, nw1):
             command,eat = rule.move(board, from_, to_)
             reward = len(eat)
             records.add(bd, from_, action, reward, vp, win=command==rule.WIN)
+        except NoActionException:
+            return Record(),0
         except Exception as e:
             logging.info('board is:')
             logging.info(board)
@@ -427,7 +432,7 @@ def simulate(nw0, nw1):
             return records, player
         if records.length() > 10000:
             logging.info('走子数过多: %s', records.length())
-            return Record(''),0
+            return Record(),0
         player = -player
         board = rule.flip_board(board)
 
@@ -444,7 +449,7 @@ def train(n0, n1, i):
     if records.length() == 0:
         return
 
-    if i%200==0:
+    if i%500==0:
         records.save('records/train/1st_')
 
     n1.copy(n0)
@@ -469,10 +474,10 @@ def train_cpn():
     n1 = ConvolutionPolicyNetwork()
     n1.copy(n0)
     episode = 300000
-    for i in range(episode, episode+episode,1):
+    for i in range(episode+1, episode+episode+1,1):
         train(n0, n1, i)
-        if i % 200 == 0:
-            n0.save_model('model/convolution_policy_network_%03d.model' % (i // 100))
+        if i % 500 == 0:
+            n0.save_model('model/convolution_policy_network_%04d.model' % (i // 100))
 
 
 if __name__ == '__main__':

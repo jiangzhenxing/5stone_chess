@@ -7,13 +7,13 @@ logger = logging.getLogger('app')
 
 class Record:
     """
-    棋谱,格式为：[board, from_, action, reward]
+    棋谱,格式为：[board, from_, action, reward, valid_probs]
     """
     def __init__(self, gamma=0.9):
         self.gamma = gamma
         self.records = []
 
-    def add(self, board, from_, action, reward, vp, win=False):
+    def add0(self, board, from_, action, reward, vp=None, win=False):
         """
         只有吃子有回报，没有赢了的额外奖励
         """
@@ -33,7 +33,7 @@ class Record:
                 rc[3] += player_rewards[player] * self.gamma
                 player_rewards[player] = rc[3]
 
-    def add1(self, board, from_, action, reward, vp, win=False):
+    def add(self, board, from_, action, reward, vp=None, win=False):
         """
         吃子有回报，赢了有额外奖励
         """
@@ -70,18 +70,15 @@ class Record:
                 b, f_, _,_,_ = record
                 record[3] += 1 if b[f_] == winner else -1
 
-    def add2(self, board, from_, action, reward, vp, win=False):
+    def add2(self, board, from_, action, reward, vp=None, win=False):
         """
         只有赢/输的奖励
         """
-        self.records.append([board, from_, action, 0, vp])
+        self.records.append([board, from_, action, reward, vp])
         if win:
             winner = board[from_]
             for rc in self.records:
                 rc[3] = 1 if rc[0][rc[1]]==winner else -1
-
-    def __iter__(self):
-        return iter(self.records)
 
     def save(self, path_pre):
         """
@@ -118,10 +115,16 @@ class Record:
                     action = rule.flip_action(action)
                 self.records.append([board, from_, action, reward])
 
-    def length(self):
-        return len(self.records)
+    def __iter__(self):
+        return iter(self.records)
 
     def __len__(self):
+        return len(self.records)
+
+    def __getitem__(self, item):
+        return self.records[item]
+
+    def length(self):
         return len(self.records)
 
     def clear(self):
