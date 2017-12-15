@@ -128,7 +128,7 @@ class ChessBoard:
         self.init_stone()
 
         # white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_149/convolution_policy_network_5995.model')
-        white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model/DQN_0010.model')
+        white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0095.model')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
 
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
@@ -180,7 +180,7 @@ class ChessBoard:
         logger.info('select action is: %s', a)
         i,j = from_
         x,y = np.array([self.w * (j + 1), self.w * (i + 1)]) + np.array(a)[::-1] * 25
-        self.action_select_signal = self.create_oval(x, y, r=12, outline='#FFB90F', width=2)
+        self.action_select_signal = self.create_oval(x, y, r=13, outline='#FFB90F', width=2)
 
     def hide_select(self):
         """
@@ -254,10 +254,8 @@ class ChessBoard:
         logger.info('init board is: \n%s', board)
         stone, canvas, w, r, row, col = self._stone, self.canvas, self.w, self.r, self.row, self.col
         for i,j in np.argwhere(board == WHITE_VALUE):
-            logger.info('white pos: (%s,%s)', i, j)
             self.stone((i,j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE))
         for i, j in np.argwhere(board == BLACK_VALUE):
-            logger.info('black pos: (%s,%s)', i, j)
             self.stone((i, j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#111', outline='#111'), value=BLACK_VALUE))
 
     def show_signal(self):

@@ -21,7 +21,7 @@ class DQN:
     value = r0 - r'0 + γr1 - γr'1 + ...
     value(s0) = r0 - r'0 + γvalue(s1)
     """
-    def __init__(self, epsilon=0.6, epsilon_decay=0.05, filepath=None):
+    def __init__(self, epsilon=1, epsilon_decay=0.15, filepath=None):
         if filepath:
             self.model = load_model(filepath)
         else:
@@ -34,7 +34,7 @@ class DQN:
         self.q_value = None
         self.valid = None
         self.vq = None
-        self.ntrain = 0 # 第几次训练
+        self.episode = 0 # 第几次训练
 
     @staticmethod
     def create_model():
@@ -43,26 +43,25 @@ class DQN:
         l = 1e-3
         # 第一个卷积层
         model.add(Convolution2D(
-            filters=50,  # 卷积核/滤波器个数
-            kernel_size=3,  # 卷积窗口大小
-            input_shape=(5, 5, 6),  # 输入平面的形状
-            strides=1,  # 步长
-            padding='same',  # padding方式 same:保持图大小不变/valid
+            filters=100,        # 卷积核/滤波器个数
+            kernel_size=3,      # 卷积窗口大小
+            input_shape=(5,5,10),  # 输入平面的形状
+            strides=1,          # 步长
+            padding='same',     # padding方式 same:保持图大小不变/valid
             activation='relu',  # 激活函数
             kernel_regularizer=l2(l),
             bias_regularizer=l2(l)
         ))
 
-        def create_conv_layer(filters=50, kernel_size=3, ):
-            return Convolution2D(filters,
-                                 kernel_size,
+        def create_conv_layer(filters=50, kernel_size=3):
+            return Convolution2D(filters=filters,
+                                 kernel_size=kernel_size,
                                  strides=1,
                                  padding='same',
                                  activation='relu',
                                  kernel_regularizer=l2(l),
                                  bias_regularizer=l2(l)
                                  )
-
         # 第二个卷积层
         model.add(create_conv_layer())
         # 第三个卷积层
@@ -70,10 +69,17 @@ class DQN:
         # 第四个卷积层
         model.add(create_conv_layer())
         # 第五个卷积层
-        model.add(create_conv_layer(filters=4, kernel_size=1))
-        # model.add(Convolution2D(4, 1, strides=1, padding='same', use_bias=False, kernel_initializer='zeros', kernel_regularizer=l2(l), name='c2'))
+        model.add(create_conv_layer(filters=25, kernel_size=1))
         # 把卷积层的输出扁平化为1维
         model.add(Flatten())
+        # 全连接层
+        model.add(Dense(units=100,
+                        activation='relu',
+                        kernel_initializer='zeros',
+                        kernel_regularizer=l2(l),
+                        bias_initializer='zeros',
+                        bias_regularizer=l2(l)
+                        ))
         # 输出Q值
         model.add(Dense(units=1,
                         activation='linear',
@@ -84,7 +90,7 @@ class DQN:
                         ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD(lr=5e-4)
+        opt = SGD(lr=1e-3)
         # 定义优化器，loss function
         model.compile(optimizer=opt, loss='mse')
         return model
@@ -100,17 +106,26 @@ class DQN:
         """
         player = board[from_]
         to_ = tuple(np.add(from_, rule.actions_move[action]))
+        # 棋盘特征:空白-己方棋子-对方棋子
         space = (board == 0).astype(np.int8).reshape((5, 5, 1))
         self = (board == player).astype(np.int8).reshape((5, 5, 1))
         opponent = (board == -player).astype(np.int8).reshape((5, 5, 1))
-        from_location = np.zeros((5,5))
+        # 动作特征
+        from_location = np.zeros((5,5,1))
         from_location[from_] = 1
-        from_location = from_location.reshape((5, 5, 1))
-        to_location = np.zeros((5,5))
+        to_location = np.zeros((5,5,1))
         to_location[to_] = 1
-        to_location = to_location.reshape((5, 5, 1))
+        # 走子后的棋盘
+        board = board.copy()
+        result,_ = rule.move(board, from_, to_)
+        space2 = (board == 0).astype(np.int8).reshape((5, 5, 1))
+        self2 = (board == player).astype(np.int8).reshape((5, 5, 1))
+        opponent2 = (board == -player).astype(np.int8).reshape((5, 5, 1))
+        # 走子后是否赢棋
+        is_win = np.ones((5,5,1)) if result == rule.WIN else np.zeros((5,5,1))
+        # 偏置
         bias = np.ones((5, 5, 1))
-        return np.concatenate((space, self, opponent, from_location, to_location, bias), axis=2)
+        return np.concatenate((space, self, opponent, from_location, to_location, space2, self2, opponent2, is_win, bias), axis=2)
 
     def q(self, board, from_, action):
         x = self.feature(board, from_, action)
@@ -147,7 +162,9 @@ class DQN:
         """
         maxq = np.max(q)
         idxes = np.argwhere(q == maxq)
-        return valid_action[0] if len(idxes) == 1 else valid_action[self.random_choice(idxes)[0]]
+        action = valid_action[self.random_choice(idxes)[0]]
+        # logger.info('maxq:%s, idxes:%s, select:%s', maxq, idxes, action)
+        return action
 
     def predict(self, board, player):
         valid = rule.valid_actions(board, player)
@@ -166,8 +183,10 @@ class DQN:
             if (board_str,from_,action) not in self.predicts or len(valid) == 1:
                 self.predicts.add((board_str,from_,action))
                 self.set_pre(q, valid, None)
-                if self.ntrain % 50 == 0:
-                    logger.info('action:%s,%s, q:%s', from_, action, q)
+                if self.episode % 50 == 0:
+                    logger.info('action:%s,%s', from_, action)
+                    logger.info('valid:%s', valid)
+                    logger.info('q:%s', q)
                 return from_,action
             else:
                 # 将已经走过的位置移除，不再选择
@@ -185,21 +204,10 @@ class DQN:
             y_train.append(reward)
         x_train = np.array(x_train, copy=False)
         y_train = np.array(y_train, copy=False)
-        # 打乱顺序
-        idx = np.arange(len(x_train))
-        np.random.shuffle(idx)
-        x_train = x_train[idx]
-        y_train = y_train[idx]
-        self._train(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose)
-
-    def _train(self, x_train, y_train, batch_size=1, epochs=1, verbose=0):
-        # 训练模型
-        # logger.info('x0 is:%s', x_train[0])
-        # logger.info('y0 is:%s', y_train[0])
         self.model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose)
 
     def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.ntrain))
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
 
     @staticmethod
     def random_choice(a):
@@ -207,7 +215,7 @@ class DQN:
 
     @staticmethod
     def load(modelfile):
-        return DQN(modelfile)
+        return DQN(filepath=modelfile)
 
     def set_pre(self, q, valid, vq):
         self.q_value = q
@@ -249,7 +257,7 @@ def init_board():
     board[4, :] = 1
     return board
 
-@print_use_time()
+# @print_use_time()
 def simulate(nw0, nw1, init='fixed'):
     board = init_board() if init=='fixed' else random_init_board()
     player = 1
@@ -286,23 +294,23 @@ def simulate(nw0, nw1, init='fixed'):
         board = rule.flip_board(board)
 
 @print_use_time()
-def train(n0, n1, i, init='fixed'):
+def train_once(n0, n1, i, init='fixed'):
     logging.info('train: %d', i)
     records, winner = simulate(n0, n1, init)
     if records.length() == 0:
         return
-    if i%500==0:
+    if i%1000==0:
         records.save('records/train/1st_')
     n1.copy(n0)
     n0.train(records, epochs=1)
     n0.clear()
     n1.clear()
-    n0.ntrain += 1
-    n1.ntrain += 1
+    n0.episode = i
+    n1.episode = i
     n0.decay_epsilon()
     n1.decay_epsilon()
 
-def train_cpn():
+def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train'])
     n0 = DQN()
@@ -310,12 +318,12 @@ def train_cpn():
     n1.copy(n0)
     episode = 300000
     for i in range(episode+1):
-        train(n0, n1, i)
-        if i % 500 == 0:
+        train_once(n0, n1, i, init='random')
+        if i % 1000 == 0:
             n0.save_model('model/DQN_%04d.model' % (i // 100))
     for i in range(episode+1, episode*2 + 1, 1):
-        train(n0, n1, i, init='random')
-        if i % 500 == 0:
+        train_once(n0, n1, i, init='fixed')
+        if i % 1000 == 0:
             n0.save_model('model/DQN_%04d.model' % (i // 100))
 
 
@@ -323,4 +331,4 @@ if __name__ == '__main__':
     import logging.config
     logging.config.fileConfig('logging.conf')
     # _main()
-    train_cpn()
+    train()

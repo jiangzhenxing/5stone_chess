@@ -40,7 +40,7 @@ def _move(board, from_, to_):
 
 def judge_eat(board, loc):
     """
-    判断是否会吃子
+    判断是否会吃子,会直接修改棋盘
     """
     result = []
     i, j = loc

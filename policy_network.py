@@ -30,9 +30,9 @@ class PolicyNetwork:
     @staticmethod
     def load(modelfile):
         if modelfile.index('convolution'):
-            return ConvolutionPolicyNetwork(modelfile)
+            return ConvolutionPolicyNetwork(filepath=modelfile)
         else:
-            return RolloutPolicyNetwork(modelfile)
+            return RolloutPolicyNetwork(filepath=modelfile)
 
     @staticmethod
     def create_model():
