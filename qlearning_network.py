@@ -1,6 +1,6 @@
 import numpy as np
 from keras.models import Sequential, load_model
-from keras.layers import Dense,Dropout,LocallyConnected1D,Convolution2D,MaxPooling2D,Flatten,Reshape,Highway
+from keras.layers import Dense,Convolution2D,Flatten,Highway
 from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
 import chess_rule as rule
@@ -49,8 +49,8 @@ class DQN:
             strides=1,          # 步长
             padding='same',     # padding方式 same:保持图大小不变/valid
             activation='relu',  # 激活函数
-            kernel_regularizer=l2(l),
-            bias_regularizer=l2(l)
+            # kernel_regularizer=l2(l),
+            # bias_regularizer=l2(l)
         ))
 
         def create_conv_layer(filters=50, kernel_size=3):
@@ -59,8 +59,8 @@ class DQN:
                                  strides=1,
                                  padding='same',
                                  activation='relu',
-                                 kernel_regularizer=l2(l),
-                                 bias_regularizer=l2(l)
+                                 # kernel_regularizer=l2(l),
+                                 # bias_regularizer=l2(l)
                                  )
         # 第二个卷积层
         model.add(create_conv_layer())
@@ -75,18 +75,18 @@ class DQN:
         # 全连接层
         model.add(Dense(units=100,
                         activation='relu',
-                        kernel_initializer='zeros',
-                        kernel_regularizer=l2(l),
-                        bias_initializer='zeros',
-                        bias_regularizer=l2(l)
+                        # kernel_initializer='zeros',
+                        # kernel_regularizer=l2(l),
+                        # bias_initializer='zeros',
+                        # bias_regularizer=l2(l)
                         ))
         # 输出Q值
         model.add(Dense(units=1,
                         activation='linear',
                         kernel_initializer='zeros',
-                        kernel_regularizer=l2(l),
+                        # kernel_regularizer=l2(l),
                         bias_initializer='zeros',
-                        bias_regularizer=l2(l)
+                        # bias_regularizer=l2(l)
                         ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
@@ -183,9 +183,9 @@ class DQN:
             if (board_str,from_,action) not in self.predicts or len(valid) == 1:
                 self.predicts.add((board_str,from_,action))
                 self.set_pre(q, valid, None)
-                if self.episode % 50 == 0:
+                if self.episode % 10 == 0:
                     logger.info('action:%s,%s', from_, action)
-                    logger.info('valid:%s', valid)
+                    # logger.info('valid:%s', valid)
                     logger.info('q:%s', q)
                 return from_,action
             else:
@@ -312,7 +312,7 @@ def train_once(n0, n1, i, init='fixed'):
 
 def train():
     logging.info('...begin...')
-    add_print_time_fun(['simulate', 'train'])
+    add_print_time_fun(['simulate', 'train_once'])
     n0 = DQN()
     n1 = DQN()
     n1.copy(n0)
