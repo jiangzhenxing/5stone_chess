@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import logging
 
+logger = logging.getLogger()
+
 NOT_MOVE = 'NOT_MOVE'
 INVALID_MOVE = 'INVALID_MOVE'
 ACCQUIRE = 'ACCQUIRE'
@@ -28,6 +30,11 @@ def move(board, from_, to_):
         # 移动距离大于1或目标位置有子，不允许移动
         return INVALID_MOVE, None
     # 允许移动
+    return _move(board, from_, to_)
+
+def move_by_action(board, from_, action):
+    to_ = tuple(np.add(from_, actions_move[action]))
+    assert board[to_] == 0, '目标处有子'
     return _move(board, from_, to_)
 
 def _move(board, from_, to_):
@@ -241,6 +248,30 @@ def neighbor(location):
     """
     return map(lambda loc: tuple(loc), filter(lambda loc: np.all(loc>=0) and np.all(loc<=4), map(lambda action: np.add(location,action), actions_move)))
 
+def random_init_board():
+    """
+    随机初始化棋盘
+    """
+    board = np.zeros((5, 5))
+    def random_init_stone(stone):
+        num = np.random.randint(2, 6)  # 棋子数量 2-5
+        logger.info('%s num is %s', stone, num)
+        for _ in range(num):
+            while True:
+                idx = np.random.randint(25)
+                pos = (idx // 5, idx % 5)
+                if board[pos] == 0:
+                    board[pos] = stone
+                    break
+    random_init_stone(1)
+    random_init_stone(-1)
+    return board
+
+def init_board():
+    board = np.zeros((5, 5))
+    board[0, :] = -1
+    board[4, :] = 1
+    return board
 
 def _main():
     bd = np.zeros((5, 5))

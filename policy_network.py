@@ -52,7 +52,7 @@ class PolicyNetwork:
     def predict(self, board, player):
         raise NotImplementedError
 
-    def _predict(self, x, board, valid):
+    def _predict(self, x, board, player, valid):
         # x = rule.feature(board, player)
         # valid = rule.valid_action(board, player)
         x = np.array([x])
@@ -60,18 +60,18 @@ class PolicyNetwork:
         p = p.reshape(5,5,4)
         vp = p * valid   # 所有可能走法的概率
         board_str = ''.join(map(str, board.flatten()))
-
+        n = 0
         try:
-            logging.info('最大概率:%.2f:%s(%.2f):%s, 和:%.2f, 平均:%.2f', np.max(vp), np.argmax(vp), np.max(p), np.argmax(p), vp.sum(), vp.sum()/valid.sum())
+            logging.info('最大概率:%.2f:%s(%.2f:%s), 和:%.2f, 平均:%.2f', np.max(vp), np.argmax(vp), np.max(p), np.argmax(p), vp.sum(), vp.sum()/valid.sum())
             if np.max(vp) == 0:
                 # 最大概率为0，随机选择
                 logging.info('>> max prob is 0 random choise...')
                 valid_index = np.argwhere(valid==1)
                 assert len(valid_index) > 0, 'no valid action'
                 row, col, action = valid_index[np.random.randint(len(valid_index))]
-                self.predicts.add((board_str, row, col, action))
+                self.predicts.add((board_str, player, ((row, col), action)))
                 self.set_pre(p, valid, vp)
-                return (row, col), action
+                return (row, col), action, vp, p
             check = True
             while True:
                 if np.max(vp) == 0:
@@ -83,13 +83,16 @@ class PolicyNetwork:
                 mx = np.max(vp)  # 最大概率
                 mx_index = np.argwhere(vp == mx)  # 所有最大概率的位置
                 row, col, action = mx_index[np.random.randint(len(mx_index))]  # 从最大概率的动作中随机选择
-                if check and (board_str,row,col,action) in self.predicts:
+                if check and (board_str,player,((row, col), action)) in self.predicts:
                     # 如果此步已经走过了，将其概率置为0，重新选择
                     vp[row,col,action] = 0
                 else:
-                    self.predicts.add((board_str,row,col,action))
+                    self.predicts.add((board_str,player,((row, col), action)))
                     self.set_pre(p, valid, vp)
-                    return (row,col),action
+                    return (row,col),action, vp, p
+                if n > 100:
+                    logging.info('!select: %s, %s,', n, (row, col, action))
+                n+=1
         except Exception as e:
             logging.info('board:')
             logging.info(board)
@@ -118,7 +121,7 @@ class PolicyNetwork:
     def policy(self, board, player):
         raise NotImplementedError
 
-    def _policy(self, x, board, valid):
+    def _policy(self, x, board, player, valid):
         x = np.array([x])
         p = self.model.predict(x)[0]
         # logger.info('p.shape: %s', p.shape)
@@ -150,7 +153,7 @@ class PolicyNetwork:
                 # valid_index = np.argwhere(valid == 1)
                 # assert len(valid_index) > 0, 'no valid action'
                 # row, col, action = valid_index[np.random.randint(len(valid_index))]
-                # self.predicts.add((board_str, row, col, action))
+                # self.predicts.add((board_str, player, ((row, col), action)))
                 # self.set_pre(p, valid, r)
                 # return (row, col), action, vp
             check = True
@@ -165,12 +168,12 @@ class PolicyNetwork:
                 idx = np.argwhere(vp > 0)
                 prob = [vp[tuple(i)] for i in idx]
                 row,col,action = self.select_by_prob(idx, prob)
-                if check and (board_str,row,col,action) in self.predicts:
+                if check and (board_str,player,((row, col), action)) in self.predicts:
                     vp[row, col, action] = 0
                 else:
-                    self.predicts.add((board_str, row, col, action))
+                    self.predicts.add((board_str, player, ((row, col), action)))
                     if self.ntrain % 10 == 0:
-                        logging.info('最大概率:%.4f(%s)_%.4f(%s), 和:%.4f, 平均:%.4f, select: %s,%s,%s',
+                        logging.debug('最大概率:%.4f(%s)_%.4f(%s), 和:%.4f, 平均:%.4f, select: %s,%s,%s',
                                      max_vp_, ','.join(map(str, max_vp_where)),
                                      maxp, ','.join(map(str, maxp_where)),
                                      vp_sum, avgp, row, col, action)
@@ -191,9 +194,22 @@ class PolicyNetwork:
             logging.info('vp is:')
             logging.info(vp)
             logging.info('-' * 50)
-            for l in self.model.layers:
-                logger.info('%s weights: %s\n', l, l.get_weights())
+            # for l in self.model.layers:
+            #     logger.info('%s weights: %s\n', l, l.get_weights())
             raise e
+
+    def probabilities(self, board, player):
+        x = rule.feature_1st(board, player)
+        valid = rule.valid_action(board, player)
+        x = np.array([x])
+        p = self.model.predict(x)[0]
+        p = p.reshape(5, 5, 4)
+        vp = p * valid  # 所有可能走法的概率
+        if vp.max() == 0:
+            vp = valid / valid.sum()
+        else:
+            vp = vp / vp.sum()
+        return vp
 
     def set_pre(self, p, valid, vp):
         self.p = p
@@ -239,12 +255,12 @@ class RolloutPolicyNetwork(PolicyNetwork):
     def predict(self, board, player):
         x = rule.feature(board, player).flatten()
         valid = rule.valid_action(board, player)
-        return self._predict(x, board, valid)
+        return self._predict(x, board, player, valid)
 
     def policy(self, board, player):
         x = rule.feature(board, player).flatten()
         valid = rule.valid_action(board, player)
-        return self._policy(x, board, valid)
+        return self._policy(x, board, player, valid)
 
 
 class ConvolutionPolicyNetwork(PolicyNetwork):
@@ -326,13 +342,13 @@ class ConvolutionPolicyNetwork(PolicyNetwork):
         x = rule.feature_1st(board, player)
         valid = rule.valid_action(board, player)
         self.set_dropout(0)
-        return self._predict(x, board, valid)
+        return self._predict(x, board, player, valid)
 
     def policy(self, board, player):
         x = rule.feature_1st(board, player)
         valid = rule.valid_action(board, player)
         self.set_dropout(0)
-        return self._policy(x, board, valid)
+        return self._policy(x, board, player, valid)
 
     def policy_1st(self, board, player):
         x = rule.feature_1st(board, player)

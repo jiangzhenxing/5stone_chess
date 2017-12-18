@@ -33,7 +33,7 @@ class Record:
                 rc[3] += player_rewards[player] * self.gamma
                 player_rewards[player] = rc[3]
 
-    def add(self, board, from_, action, reward, vp=None, win=False):
+    def add1(self, board, from_, action, reward, vp=None, win=False):
         """
         吃子有回报，赢了有额外奖励
         """
@@ -72,13 +72,23 @@ class Record:
 
     def add2(self, board, from_, action, reward, vp=None, win=False):
         """
-        只有赢/输的奖励
+        只有赢/输的奖励(1/-1)
         """
         self.records.append([board, from_, action, reward, vp])
         if win:
             winner = board[from_]
             for rc in self.records:
                 rc[3] = 1 if rc[0][rc[1]]==winner else -1
+
+    def add(self, board, from_, action, reward, vp=None, win=False):
+        """
+        只有赢/输的奖励(1/0)
+        """
+        self.records.append([board, from_, action, reward, vp])
+        if win:
+            winner = board[from_]
+            for rc in self.records:
+                rc[3] = 1 if rc[0][rc[1]]==winner else 0
 
     def save(self, path_pre):
         """

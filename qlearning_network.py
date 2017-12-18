@@ -21,14 +21,15 @@ class DQN:
     value = r0 - r'0 + γr1 - γr'1 + ...
     value(s0) = r0 - r'0 + γvalue(s1)
     """
-    def __init__(self, epsilon=1, epsilon_decay=0.15, filepath=None):
+    def __init__(self, epsilon=1, epsilon_decay=0.15, output_activation='linear', filepath=None):
         if filepath:
             self.model = load_model(filepath)
         else:
-            self.model = self.create_model()
+            self.model = self.create_model(output_activation=output_activation)
         self.epsilon = epsilon
         self._epsilon = epsilon
         self.epsilon_decay = epsilon_decay
+        self.output_activation = output_activation
         self.predicts = set()
         # 跟踪上一步的值，供调试
         self.q_value = None
@@ -37,7 +38,7 @@ class DQN:
         self.episode = 0 # 第几次训练
 
     @staticmethod
-    def create_model():
+    def create_model(output_activation='linear'):
         # 定义顺序模型
         model = Sequential()
         l = 1e-3
@@ -82,11 +83,11 @@ class DQN:
                         ))
         # 输出Q值
         model.add(Dense(units=1,
-                        activation='linear',
+                        activation=output_activation,
                         kernel_initializer='zeros',
-                        # kernel_regularizer=l2(l),
+                        kernel_regularizer=l2(l),
                         bias_initializer='zeros',
-                        # bias_regularizer=l2(l)
+                        bias_regularizer=l2(l)
                         ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
@@ -313,8 +314,8 @@ def train_once(n0, n1, i, init='fixed'):
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
-    n0 = DQN()
-    n1 = DQN()
+    n0 = DQN(output_activation='sigmoid')
+    n1 = DQN(output_activation='sigmoid')
     n1.copy(n0)
     episode = 300000
     for i in range(episode+1):

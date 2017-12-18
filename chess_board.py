@@ -6,7 +6,7 @@ import chess_rule as rule
 from tkinter import font
 from tkinter import messagebox
 from tkinter import filedialog
-from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer
+from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer,MCTSPlayer
 from record import Record
 import logging
 
@@ -105,6 +105,7 @@ class ChessBoard:
         self.text = lb
         self.black_player = None
         self.white_player = None
+        self.players = [None,None,None]
         self.current_player = None
         self.current_stone = None
         self.timer = None
@@ -128,9 +129,11 @@ class ChessBoard:
         self.init_stone()
 
         # white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_149/convolution_policy_network_5995.model')
-        white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0030.model')
+        # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model')
+        white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model')
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
-
+        self.players[white_player.stone_val] = white_player
+        self.players[black_player.stone_val] = black_player
         # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
         # black_player = PolicyNetworkPlayer('PIG', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, modelfile='model/policy_network_005.model')
         for row in self._stone:
@@ -157,19 +160,22 @@ class ChessBoard:
         if self.current_player.is_humman():
             return
         board = self.board()
-        from_, to_, p = self.current_player.play(board)
-        valid_action = rule.valid_action(board, self.current_player.stone_val)
+        self.current_player.play(board, self._play)
+
+    def _play(self, board, player, from_, to_, p):
+        logger.info('from:%s, to_:%s', from_, to_)
+        valid_action = rule.valid_action(board, player)
         self.show_qtext(p, valid_action)
         self.show_select(from_, to_)
         stone = self.stone(from_)
-        def _play():
+        def play_later():
             result = self.move_to(stone, to_)
             if result == rule.ACCQUIRE:
                 self.switch_player_and_play()
             elif result == rule.WIN:
                 logger.info('GAME OVER, WINNER IS %s', stone.player.name)
                 self.game_over(stone.player)
-        self.play_timer = self.window.after(int(self.period * 1000), _play)
+        self.play_timer = self.window.after(int(self.period * 1000), play_later)
 
     def show_select(self, from_, to_):
         """
@@ -258,33 +264,6 @@ class ChessBoard:
         for i, j in np.argwhere(board == BLACK_VALUE):
             self.stone((i, j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#111', outline='#111'), value=BLACK_VALUE))
 
-    def show_signal(self):
-        self.canvas.itemconfigure(self.current_player.signal, state=tk.NORMAL)
-
-    def hide_signal(self):
-        self.canvas.itemconfigure(self.sig_white, state=tk.HIDDEN)
-        self.canvas.itemconfigure(self.sig_black, state=tk.HIDDEN)
-
-    def show_winner(self):
-        self.canvas.itemconfigure(self.winner.winner_text, state=tk.NORMAL)
-
-    def hide_winner(self):
-        self.canvas.itemconfigure(self.winner_white, state=tk.HIDDEN)
-        self.canvas.itemconfigure(self.winner_black, state=tk.HIDDEN)
-
-    def begin_timer(self):
-        self.current_player.begin_time = int(time.time())
-        def timer(player):
-            use_time = int(time.time()) - player.begin_time
-            player.total_time += use_time
-            self.canvas.itemconfigure(player.clock, text='%02d:%02d' % (use_time // 60, use_time % 60))
-            self.timer = self.canvas.after(1000, timer, player)
-        self.timer = self.canvas.after(1000, timer, self.current_player)
-
-    def cancel_timer(self):
-        self.canvas.after_cancel(self.timer)
-        self.canvas.itemconfigure(self.current_player.clock, text='00:00')
-
     def game_over(self, winner):
         # self.lb.config(text='winner is: ' + str(winner))
         self.winner = winner
@@ -296,12 +275,8 @@ class ChessBoard:
         self.start_btn_text.set('start')
         self.record_path.set(self.record.save('records/app/' + winner.name + '_'))
         self.record.clear()
-
-    def board(self):
-        return np.array([[0 if s is None else s.value for s in row] for row in self._stone])
-
-    def show_message(self, message):
-        self.text.config(text=message)
+        self.white_player.stop()
+        self.black_player.stop()
 
     def onmotion(self, event):
         self.show_message('position is (%d,%d)' % (event.x, event.y))
@@ -341,6 +316,8 @@ class ChessBoard:
 
     def end_moving(self, loc):
         stone = self.current_stone
+        board = self.board()
+        from_ = stone.loc
         result = self.move_to(stone, loc)
         if result == rule.INVALID_MOVE:
             return False
@@ -351,10 +328,18 @@ class ChessBoard:
             self.move_to_loc(stone, loc)
 
         if result == rule.ACCQUIRE:
+            # 将走的子告知对手
+            self.opponent().opponent_play(board, from_, loc)
             self.switch_player_and_play()
         elif result == rule.WIN:
             logger.info('GAME OVER, WINNER IS %s', stone.player.name)
+            self.opponent().opponent_play(None, None, None)
             self.game_over(stone.player)
+
+    def opponent(self, player=None):
+        if player is None:
+            player = self.current_player
+        return self.players[-player.stone_val]
 
     def move_to(self, stone, to_loc):
         """
@@ -461,6 +446,39 @@ class ChessBoard:
         j = int(x / self.w - 0.5)
         if -1 < i < 5 and -1 < j < 5:
             return i,j
+
+    def board(self):
+        return np.array([[0 if s is None else s.value for s in row] for row in self._stone])
+
+    def begin_timer(self):
+        self.current_player.begin_time = int(time.time())
+        def timer(player):
+            use_time = int(time.time()) - player.begin_time
+            player.total_time += use_time
+            self.canvas.itemconfigure(player.clock, text='%02d:%02d' % (use_time // 60, use_time % 60))
+            self.timer = self.canvas.after(1000, timer, player)
+        self.timer = self.canvas.after(1000, timer, self.current_player)
+
+    def cancel_timer(self):
+        self.canvas.after_cancel(self.timer)
+        self.canvas.itemconfigure(self.current_player.clock, text='00:00')
+
+    def show_message(self, message):
+        self.text.config(text=message)
+
+    def show_signal(self):
+        self.canvas.itemconfigure(self.current_player.signal, state=tk.NORMAL)
+
+    def hide_signal(self):
+        self.canvas.itemconfigure(self.sig_white, state=tk.HIDDEN)
+        self.canvas.itemconfigure(self.sig_black, state=tk.HIDDEN)
+
+    def show_winner(self):
+        self.canvas.itemconfigure(self.winner.winner_text, state=tk.NORMAL)
+
+    def hide_winner(self):
+        self.canvas.itemconfigure(self.winner_white, state=tk.HIDDEN)
+        self.canvas.itemconfigure(self.winner_black, state=tk.HIDDEN)
 
     @staticmethod
     def launch():
