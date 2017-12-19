@@ -1,5 +1,7 @@
 import numpy as np
 import time
+from threading import Thread
+from queue import Queue
 from policy_network import PolicyNetwork
 import chess_rule as rule
 import logging
@@ -178,6 +180,8 @@ class MCTS:
             self.worker.ntrain += 1
             logger.info('search %s', self.n_search)
         logger.info('search over')
+        self.stop = False
+        self.n_search = 0
         self.show_info()
 
     def stop_search(self):
@@ -191,7 +195,6 @@ class MCTS:
         action = e.a
         self.predicted.add((self.root.board_str, self.root.player, action))
         q = [(e.a,e.q()) for e in self.root.sub_edge]
-        self.clear()
         logger.info('predict is:%s', action)
         return action, q
 
@@ -238,17 +241,39 @@ class MCTS:
         self.n_search = 0
 
     def show_info(self):
-        logger.info(logger.level)
-        info = '------------- tree info --------------\n' \
+        info = '\n------------- tree info --------------\n' \
                'depth:%s, n_node:%s\n' \
                'root is:\n%s'
         logger.info(info, self.depth, self.n_node, self.root)
-        # logger.info('------------- tree info --------------')
-        # logger.info('depth:%s, n_node:%s', self.depth, self.n_node)
-        # logger.info('root is:\n%s', self.root)
         for e in self.root.sub_edge:
             logger.info('edge:%s, p:%s, N:%s, W:%s, q:%s', e.a, e.p, e.n, e.w, e.q())
             logger.debug(e.down_node)
+
+
+class MCTSWorker:
+    def __init__(self):
+        self.queue = Queue()
+        self.ts = None
+
+    def start(self):
+        while True:
+            board, player, action = self.queue.get()
+            logger.info('\nget: \n%s\n player:%s action:%s', board, player, action)
+            if board is None:
+                break
+            if not self.ts:
+                self.ts = MCTS(board, player, max_search=1000, expansion_gate=50)
+                self.ts.show_info()
+            if action is None:
+                # 走棋
+                a, q = self.ts.predict(board, player)
+                self.queue.put((a, q))
+                self.ts.move_down(self.ts.root.board, self.ts.root.player, a)
+            else:
+                # 对手走棋，向下移动树
+                logger.info('move down...')
+                self.ts.move_down(board, player, action)
+        logger.info('...MCTS ENDED...')
 
 
 def main():

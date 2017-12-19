@@ -80,7 +80,7 @@ class ChessBoard:
         record_path = tk.StringVar()
         record_entry = tk.Entry(window, textvariable=record_path, width=10)
         record_entry.place(x=185, y=620)
-        tk.Button(text='open', command=self.select_record).place(x=280, y=620)
+        tk.Button(text='open', command=self.select_record).place(x=285, y=620)
 
         # 速度调节按扭
         tk.Button(window, text='faster', command=lambda:self.change_period(0.5)).place(x=350, y=620)
@@ -127,10 +127,10 @@ class ChessBoard:
                 return
         self.clear()
         self.init_stone()
-
+        first_player = BLACK_VALUE
         # white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_149/convolution_policy_network_5995.model')
         # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model')
-        white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model')
+        white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model', board=self.board(), first_player=first_player)
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
         self.players[white_player.stone_val] = white_player
         self.players[black_player.stone_val] = black_player
@@ -144,16 +144,12 @@ class ChessBoard:
         self.white_player = white_player
         self.canvas.itemconfigure(self.name_white, text=white_player.name)
         self.canvas.itemconfigure(self.name_black, text=black_player.name)
-        self.current_player = black_player
+        self.current_player = self.players[first_player]
         self.show_signal()
         self.begin_timer()
         self.canvas.bind('<Button-1>', self.onclick)
         self.start_btn_text.set('restart')
         self.play()
-
-    def change_period(self, scale):
-        self.period *= scale
-        logger.debug(self.period)
 
     def play(self):
         logger.info('%s play...', self.current_player)
@@ -171,6 +167,14 @@ class ChessBoard:
         def play_later():
             result = self.move_to(stone, to_)
             if result == rule.ACCQUIRE:
+                # 预测对手走棋
+                bd = self.board()
+                pl = -player
+                op = self.current_player.predict_opponent(bd)
+                if op:
+                    valid = rule.valid_action(bd, pl)
+                    self.show_qtext(op, valid)
+                # 对手走棋
                 self.switch_player_and_play()
             elif result == rule.WIN:
                 logger.info('GAME OVER, WINNER IS %s', stone.player.name)
@@ -462,6 +466,10 @@ class ChessBoard:
     def cancel_timer(self):
         self.canvas.after_cancel(self.timer)
         self.canvas.itemconfigure(self.current_player.clock, text='00:00')
+
+    def change_period(self, scale):
+        self.period *= scale
+        logger.debug(self.period)
 
     def show_message(self, message):
         self.text.config(text=message)
