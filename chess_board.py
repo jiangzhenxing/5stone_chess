@@ -183,7 +183,7 @@ class ChessBoard:
         """
         self.hide_select()
         a = np.subtract(to_, from_)
-        logger.info('select action is: %s', a)
+        logger.debug('select action is: %s', tuple(a))
         i,j = from_
         x,y = np.array([self.w * (j + 1), self.w * (i + 1)]) + np.array(a)[::-1] * 25
         self.action_select_signal = self.create_oval(x, y, r=13, outline='#FFB90F', width=2)

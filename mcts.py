@@ -12,13 +12,14 @@ logger = logging.getLogger('train')
 # lambda_ = 0
 
 class Node:
-    def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False):
+    def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False, final=False):
         self.board = board
         self.player = player
         self.tree = tree
         self.level = level
         self.parent_edge = parent_edge
         self.expanded = expanded
+        self.final = final
         self.board_str = ''.join(map(str, board.flatten()))
         self.sub_edge = []
         tree.set_depth(level)
@@ -28,7 +29,9 @@ class Node:
         return max(self.sub_edge, key=lambda e: e.n)
 
     def search(self):
-        if not self.expanded:
+        if self.final:
+            winner = -self.player
+        elif not self.expanded:
             winner = self.default_policy()
             if self.parent_edge.n > self.tree.expansion_gate:
                 self.expansion()
@@ -72,10 +75,10 @@ class Node:
     def tree_policy(self):
         e = self.selection()
         self.tree.worker.predicts.add((self.board_str, self.player, e.a))
-        if e.win:
-            winner = self.player
-        else:
-            winner = e.down_node.search()
+        # if e.win:
+        #     winner = self.player
+        # else:
+        winner = e.down_node.search()
         return winner
 
     def expansion(self):
@@ -102,7 +105,7 @@ class Node:
 
 
     def __str__(self):
-        return 'board is:\n%s\nplayer is:%s' % (self.board, self.player)
+        return '%s, player:%s' % (self.board,self.player)
 
     def show(self):
         logger.debug('board is:\n%s', self.board)
@@ -131,12 +134,12 @@ class Edge:
         self.w = 0
         board, player = upper_node.board.copy(), upper_node.player
         result, _ = rule.move_by_action(board, *a)
-        self.down_node = Node(board=rule.flip_board(board), player=-player, tree=upper_node.tree, level=upper_node.level+1, parent_edge=self)
-        self.win = result == rule.WIN
+        self.down_node = Node(board=rule.flip_board(board), player=-player, tree=upper_node.tree, level=upper_node.level+1, parent_edge=self, final=result==rule.WIN)
+        # self.win = result == rule.WIN
 
     def q(self):
-        if self.win:
-            return 100
+        # if self.win:
+        #     return 100
         win = 0 if self.n == 0 else self.w / self.n # 胜率
         q = self.l * self.v + (1 - self.l) * win    # Q
         u = self.p / (self.n + 1)
@@ -174,29 +177,34 @@ class MCTS:
             self.worker.clear()
             self.worker.ntrain += 1
             logger.info('search %s', self.n_search)
+        logger.info('search over')
         self.show_info()
 
     def stop_search(self):
         self.stop = True
 
-    def predict(self):
+    def predict(self, board, player):
+        assert (self.root.board == board).all() and self.root.player == player, \
+                '%s,player:%s\nroot:\n%s,player:%s' % (board,player,self.root.board,self.root.player)
         self.search()
         e = self.root.predict()
         action = e.a
         self.predicted.add((self.root.board_str, self.root.player, action))
         q = [(e.a,e.q()) for e in self.root.sub_edge]
         self.clear()
+        logger.info('predict is:%s', action)
         return action, q
 
     def move_down(self, board, player, action):
         assert np.all(self.root.board==board), 'root_board:\n' + str(self.root.board) + '\nboard:\n' + str(board)
         assert self.root.player == player, 'root_player:%s, player:%s' % (self.root.player, player)
         node = self.get_node(action)
-        logger.info('get_node(%s):%s', action, node)
+        logger.debug('get_node(%s):\n%s', action, node)
         if node is None:
+            logger.info('node is None, new Node()')
             board = board.copy()
             rule.move_by_action(board, *action)
-            node = Node(board, -player, tree=self)
+            node = Node(rule.flip_board(board), -player, tree=self)
         if not node.expanded:
             node.expansion()
         self.root = node
@@ -205,7 +213,7 @@ class MCTS:
         self.n_node = 1
         self.depth = 1
         self.update_tree_info(self.root)
-        logger.info('move down to node:\n%s', self.root)
+        logger.info('move down to node:%s', action)
         self.show_info()
 
     def update_tree_info(self, node):
@@ -230,9 +238,16 @@ class MCTS:
         self.n_search = 0
 
     def show_info(self):
-        logger.info('depth:%s, n_node:%s', self.depth, self.n_node)
+        logger.info(logger.level)
+        info = '------------- tree info --------------\n' \
+               'depth:%s, n_node:%s\n' \
+               'root is:\n%s'
+        logger.info(info, self.depth, self.n_node, self.root)
+        # logger.info('------------- tree info --------------')
+        # logger.info('depth:%s, n_node:%s', self.depth, self.n_node)
+        # logger.info('root is:\n%s', self.root)
         for e in self.root.sub_edge:
-            logger.info('%s: p:%s, N:%s, W:%s, q:%s', e.a, e.p, e.n, e.w, e.q())
+            logger.info('edge:%s, p:%s, N:%s, W:%s, q:%s', e.a, e.p, e.n, e.w, e.q())
             logger.debug(e.down_node)
 
 

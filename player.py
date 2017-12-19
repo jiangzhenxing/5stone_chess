@@ -103,6 +103,8 @@ class DQNPlayer(ComputerPlayer):
         logger.info('%s play...', self.name)
         if self.stone_val == -1:
             board_self = rule.flip_board(board)
+        else:
+            board_self = board.copy()
         (from_, action), (valid, q) = self.model.predict(board_self, self.stone_val)
         logger.info('valid is:%s', valid)
         logger.info('q is:%s', q)
@@ -131,6 +133,8 @@ class MCTSPlayer(ComputerPlayer):
     def play(self, board, play):
         if self.stone_val == -1:
             board_self = rule.flip_board(board)
+        else:
+            board_self = board.copy()
         self.player_end.send((board_self, self.stone_val, None))
         def wait_result_to_play():
             (from_, action), q = self.player_end.recv()
@@ -163,21 +167,21 @@ class MCTSPlayer(ComputerPlayer):
         ts = None
         while True:
             board, player, action = self.mcts_end.recv()
-            logger.info('recv: board:%s\n player:%s action:%s', board, player, action)
+            logger.info('\nrecv: \n%s\n player:%s action:%s', board, player, action)
             if board is None:
                 break
+            if not ts:
+                ts = MCTS(board, player, max_search=1000, expansion_gate=50)
+                ts.show_info()
             if action is None:
                 # 走棋
-                if not ts:
-                    ts = MCTS(board, player, max_search=100)
-                a,q = ts.predict()
+                a,q = ts.predict(board, player)
                 self.mcts_end.send((a,q))
                 ts.move_down(ts.root.board, ts.root.player, a)
             else:
                 # 对手走棋，向下移动树
-                if ts:
-                    logger.info('move down...')
-                    ts.move_down(board, player, action)
+                logger.info('move down...')
+                ts.move_down(board, player, action)
 
     def stop(self):
         self.player_end.send((None, None, None))
