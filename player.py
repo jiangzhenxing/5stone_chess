@@ -187,26 +187,34 @@ class MCTSPlayer(ComputerPlayer):
 
     def start(self, board, first_player):
         logger.info('start...')
-        from mcts import MCTS
+        from mcts import MCTSWorker
         if first_player == -1:
             board = rule.flip_board(board)
-        ts = MCTS(board, first_player, max_search=1000, expansion_gate=50)
-        ts.show_info()
+        ts_worker = MCTSWorker(board, first_player, max_search=50, expansion_gate=10)
+        # ts = MCTS(board, first_player, max_search=1000, expansion_gate=50)
+        # ts.show_info()
+        if first_player != self.stone_val:
+            # 对手走棋时，开始搜索
+            ts_worker.begin_search()
         while True:
             board, player, action = self.mcts_end.recv()
             logger.info('\nrecv: \n%s\n player:%s action:%s', board, player, action)
             if board is None:
+                ts_worker.stop()
                 break
             if action is None:
                 # 走棋
-                a,q = ts.predict(board, player)
+                a,q = ts_worker.predict(board, player)
                 self.mcts_end.send((a,q))
-                ts.move_down(ts.root.board, ts.root.player, a)
+                # 对手走棋时继续搜索
+                ts_worker.begin_search()
             else:
                 # 对手走棋，向下移动树
-                logger.info('move down...')
-                ts.move_down(board, player, action)
-        logger.info('...MCTS ENDED...')
+                logger.info('对手走棋:%s stop search', action)
+                ts_worker.stop_search()
+                logger.info('move down along %s', action)
+                ts_worker.move_down(action)
+        logger.info('...MCTS PROCESS ENDED...')
 
     def stop(self):
         self.player_end.send((None, None, None))

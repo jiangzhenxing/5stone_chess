@@ -1,6 +1,6 @@
 import numpy as np
 import time
-from threading import Thread
+from threading import Thread,Event
 from queue import Queue
 from policy_network import PolicyNetwork
 import chess_rule as rule
@@ -155,12 +155,14 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, expansion_gate=25, lambda_=0.5, max_search=1000, max_search_time=600):
+    def __init__(self, board, player, expansion_gate=50, lambda_=0.5, max_search=1000, max_search_time=600):
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
         self.max_search = max_search            # 最大的搜索次数
         self.max_search_time = max_search_time  # 最大的搜索时间(s)
+        self.searching = False
         self.stop = False
+        self.stop_event = Event()
         self.depth = 0
         self.n_node = 0
         self.n_search = 0
@@ -170,9 +172,12 @@ class MCTS:
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
         self.root.expansion()
 
-    def search(self):
+    def search(self, max_search=0, max_search_time=0):
+        self.searching = True
+        if max_search == 0: max_search = self.max_search
+        if max_search_time == 0: max_search_time = self.max_search_time
         start_time = time.time()
-        while not self.stop and self.n_search < self.max_search and time.time()-start_time < self.max_search_time:
+        while not self.stop and self.n_search < max_search and time.time()-start_time < max_search_time:
             self.worker.predicts.update(self.predicted)
             self.root.search()
             self.n_search += 1
@@ -180,12 +185,21 @@ class MCTS:
             self.worker.ntrain += 1
             logger.info('search %s', self.n_search)
         logger.info('search over')
-        self.stop = False
         self.n_search = 0
         self.show_info()
+        self.searching = False
+        if self.stop:
+            self.stop_event.set()
 
     def stop_search(self):
+        if not self.searching:
+            return
         self.stop = True
+        # 等待搜索结束
+        self.stop_event.wait()
+        self.stop = False
+        self.stop_event.clear()
+        logger.info('search stopped...')
 
     def predict(self, board, player):
         assert (self.root.board == board).all() and self.root.player == player, \
@@ -250,30 +264,60 @@ class MCTS:
             logger.debug(e.down_node)
 
 
+class COMMAND:
+    pass
+COMMAND.SEARCH = 'SEARCH'
+COMMAND.MOVE_DOWN = 'MOVE_DOWN'
+COMMAND.PREDICT = 'PREDICT'
+COMMAND.STOP = 'STOP'
+COMMAND.STOP_SEARCH = 'STOP_SEARCH'
+
+
 class MCTSWorker:
-    def __init__(self):
-        self.queue = Queue()
-        self.ts = None
+    def __init__(self, board, first_player, max_search=1000, expansion_gate=50):
+        self.command_queue = Queue()
+        self.result_queue = Queue()
+        self.ts =  MCTS(board, first_player, max_search=max_search, expansion_gate=expansion_gate)
+        self.ts.show_info()
+        Thread(target=self.start).start()
 
     def start(self):
         while True:
-            board, player, action = self.queue.get()
-            logger.info('\nget: \n%s\n player:%s action:%s', board, player, action)
-            if board is None:
+            command, board, player, action = self.command_queue.get()
+            logger.info('\nget: %s\n%s\n player:%s action:%s', command, board, player, action)
+            if command == COMMAND.STOP:
                 break
-            if not self.ts:
-                self.ts = MCTS(board, player, max_search=1000, expansion_gate=50)
-                self.ts.show_info()
-            if action is None:
+            if command == COMMAND.PREDICT:
                 # 走棋
                 a, q = self.ts.predict(board, player)
-                self.queue.put((a, q))
+                self.result_queue.put((a, q))
                 self.ts.move_down(self.ts.root.board, self.ts.root.player, a)
-            else:
+            elif command == COMMAND.MOVE_DOWN:
                 # 对手走棋，向下移动树
                 logger.info('move down...')
                 self.ts.move_down(board, player, action)
-        logger.info('...MCTS ENDED...')
+            elif command == COMMAND.SEARCH:
+                self.ts.search(max_search=2**32, max_search_time=2**32)
+        logger.info('...MCTS WORKER ENDED...')
+
+    def send(self, command, board=None, player=None, action=None):
+        self.command_queue.put((command, board, player, action))
+
+    def predict(self, board, player):
+        self.send(COMMAND.PREDICT, board, player)
+        return self.result_queue.get()
+
+    def begin_search(self):
+        self.send(COMMAND.SEARCH)
+
+    def stop_search(self):
+        self.ts.stop_search()
+
+    def move_down(self, action):
+        self.send(COMMAND.MOVE_DOWN, self.ts.root.board, self.ts.root.player, action)
+
+    def stop(self):
+        self.send(COMMAND.STOP)
 
 
 def main():
