@@ -1,6 +1,6 @@
 import numpy as np
 from keras.models import Sequential, load_model
-from keras.layers import Dense,Convolution2D,Flatten,Highway
+from keras.layers import Dense,Convolution2D,Flatten
 from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
 import chess_rule as rule
@@ -21,11 +21,8 @@ class DQN:
     value = r0 - r'0 + γr1 - γr'1 + ...
     value(s0) = r0 - r'0 + γvalue(s1)
     """
-    def __init__(self, epsilon=1, epsilon_decay=0.15, output_activation='linear', filepath=None):
-        if filepath:
-            self.model = load_model(filepath)
-        else:
-            self.model = self.create_model(output_activation=output_activation)
+    def __init__(self, epsilon=1.0, epsilon_decay=0.15, output_activation='linear', filepath=None):
+        self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
         self.epsilon_decay = epsilon_decay
@@ -36,9 +33,9 @@ class DQN:
         self.valid = None
         self.vq = None
         self.episode = 0 # 第几次训练
+        self.model = load_model(filepath) if filepath else self.create_model()
 
-    @staticmethod
-    def create_model(output_activation='linear'):
+    def create_model(self):
         # 定义顺序模型
         model = Sequential()
         l = 1e-3
@@ -60,8 +57,6 @@ class DQN:
                                  strides=1,
                                  padding='same',
                                  activation='relu',
-                                 # kernel_regularizer=l2(l),
-                                 # bias_regularizer=l2(l)
                                  )
         # 第二个卷积层
         model.add(create_conv_layer())
@@ -76,24 +71,33 @@ class DQN:
         # 全连接层
         model.add(Dense(units=100,
                         activation='relu',
-                        # kernel_initializer='zeros',
-                        # kernel_regularizer=l2(l),
-                        # bias_initializer='zeros',
-                        # bias_regularizer=l2(l)
                         ))
         # 输出Q值
-        model.add(Dense(units=1,
-                        activation=output_activation,
-                        kernel_initializer='zeros',
-                        kernel_regularizer=l2(l),
-                        bias_initializer='zeros',
-                        bias_regularizer=l2(l)
-                        ))
-        # 定义优化器
-        # opt = Adam(lr=1e-4)
-        opt = SGD(lr=1e-3)
-        # 定义优化器，loss function
-        model.compile(optimizer=opt, loss='mse')
+        if self.output_activation == 'linear':
+            model.add(Dense(units=1,
+                            activation='linear',
+                            kernel_initializer='zeros',
+                            bias_initializer='zeros',
+                            ))
+            # 定义优化器
+            # opt = Adam(lr=1e-4)
+            opt = SGD(lr=1e-3)
+            # loss function
+            loss = 'mes'
+        elif self.output_activation == 'sigmoid':
+            model.add(Dense(units=1,
+                            activation='sigmoid',
+                            kernel_initializer='zeros',
+                            kernel_regularizer=l2(l),
+                            bias_initializer='zeros',
+                            bias_regularizer=l2(l)
+                            ))
+            # 定义优化器
+            # opt = Adam(lr=1e-4)
+            opt = SGD(lr=1e-3)
+            # loss function
+            loss = 'binary_crossentropy'
+        model.compile(optimizer=opt, loss=loss)
         return model
 
     @staticmethod
@@ -207,6 +211,14 @@ class DQN:
         y_train = np.array(y_train, copy=False)
         self.model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose)
 
+    def probabilities(self, board, player):
+        valid = rule.valid_actions(board, player)
+        qs = [self.q(board, from_, action) for from_, action in valid]
+        q2 = np.zeros((5,5,4))
+        for (from_, action),q in zip(valid,qs):
+            q2[from_][action] = q
+        return q2
+
     def decay_epsilon(self):
         self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
 
@@ -215,8 +227,8 @@ class DQN:
         return a[np.random.randint(len(a))]
 
     @staticmethod
-    def load(modelfile):
-        return DQN(filepath=modelfile)
+    def load(modelfile, epsilon=0.3):
+        return DQN(epsilon=epsilon, filepath=modelfile)
 
     def set_pre(self, q, valid, vq):
         self.q_value = q
@@ -233,34 +245,9 @@ class DQN:
         self.model.save(filepath)
 
 
-def random_init_board():
-    """
-    随机初始化棋盘
-    """
-    board = np.zeros((5, 5))
-    def random_init_stone(stone):
-        num = np.random.randint(2, 6)  # 棋子数量 2-5
-        logger.info('%s num is %s', stone, num)
-        for _ in range(num):
-            while True:
-                idx = np.random.randint(25)
-                pos = (idx // 5, idx % 5)
-                if board[pos] == 0:
-                    board[pos] = stone
-                    break
-    random_init_stone(1)
-    random_init_stone(-1)
-    return board
-
-def init_board():
-    board = np.zeros((5, 5))
-    board[0, :] = -1
-    board[4, :] = 1
-    return board
-
 # @print_use_time()
 def simulate(nw0, nw1, init='fixed'):
-    board = init_board() if init=='fixed' else random_init_board()
+    board = rule.init_board() if init=='fixed' else rule.random_init_board()
     player = 1
     records = Record()
     while True:
@@ -272,7 +259,7 @@ def simulate(nw0, nw1, init='fixed'):
             to_ = tuple(np.add(from_, rule.actions_move[action]))
             command,eat = rule.move(board, from_, to_)
             reward = len(eat)
-            records.add(bd, from_, action, reward, win=command==rule.WIN)
+            records.add3(bd, from_, action, reward, win=command==rule.WIN)
         except NoActionException:
             return Record(),0
         except Exception as e:
@@ -301,7 +288,7 @@ def train_once(n0, n1, i, init='fixed'):
     if records.length() == 0:
         return
     if i%1000==0:
-        records.save('records/train/1st_')
+        records.save('records/train/qlearning_network/1st_')
     n1.copy(n0)
     n0.train(records, epochs=1)
     n0.clear()
@@ -314,18 +301,19 @@ def train_once(n0, n1, i, init='fixed'):
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
-    n0 = DQN(output_activation='sigmoid')
-    n1 = DQN(output_activation='sigmoid')
+    activation = 'sigmoid'
+    n0 = DQN(output_activation=activation)
+    n1 = DQN(output_activation=activation)
     n1.copy(n0)
-    episode = 300000
+    episode = 2000000
     for i in range(episode+1):
         train_once(n0, n1, i, init='random')
-        if i % 1000 == 0:
-            n0.save_model('model/DQN_%04d.model' % (i // 100))
-    for i in range(episode+1, episode*2 + 1, 1):
-        train_once(n0, n1, i, init='fixed')
-        if i % 1000 == 0:
-            n0.save_model('model/DQN_%04d.model' % (i // 100))
+        if i % 10000 == 0:
+            n0.save_model('model/qlearning_network/DQN_%s_%05d.model' % (activation, i // 10000))
+    # for i in range(episode+1, episode*2 + 1, 1):
+    #     train_once(n0, n1, i, init='fixed')
+    #     if i % 1000 == 0:
+    #         n0.save_model('model/DQN_%04d.model' % (i // 100))
 
 
 if __name__ == '__main__':

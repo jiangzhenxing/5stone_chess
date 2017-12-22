@@ -46,7 +46,7 @@ class ChessBoard:
             canvas.create_line(i * w, w, i * w, 5 * w, width=2)
 
         # 棋子
-        self._stone = [[None for _ in range(col)] for _ in range(row)]
+        self._board = [[None for _ in range(col)] for _ in range(row)]
 
         # Q值
         self._qtext = [[[canvas.create_text(*(np.array([w * (j + 1), w * (i + 1)]) + np.array(a)[::-1] * 25), text='', fill='green') for a in rule.actions_move] for j in range(5)] for i in range(5)]
@@ -119,6 +119,7 @@ class ChessBoard:
         self.record_entry = record_entry
         self.event = threading.Event()
         self.record = Record()    # 记录棋谱: board:from_:to_:del_num
+        self.stones = []
         self.init_stone()
 
     def start(self):
@@ -127,19 +128,15 @@ class ChessBoard:
                 return
         self.clear()
         self.init_stone()
-        first_player = BLACK_VALUE
-        # white_player = PolicyNetworkPlayer('PIG', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/model_149/convolution_policy_network_5995.model')
-        # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model')
-        white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, modelfile='model/DQN_0090.model', board=self.board(), first_player=first_player)
+        first_player = WHITE_VALUE
+        white_player = PolicyNetworkPlayer('Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/policy_network/convolution_4500.model')
+        # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/qlearning_network/DQN_dr_6000.model')
+        # white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/DQN_0090.model', init_board=self.board(), first_player=first_player)
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
-        self.players[white_player.stone_val] = white_player
-        self.players[black_player.stone_val] = black_player
-        # white_player= HummaPlayer('Jhon', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white)
-        # black_player = PolicyNetworkPlayer('PIG', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, modelfile='model/policy_network_005.model')
-        for row in self._stone:
-            for stone in row:
-                if stone is not None:
-                    stone.player = white_player if stone.value == WHITE_VALUE else black_player
+        self.players[WHITE_VALUE] = white_player
+        self.players[BLACK_VALUE] = black_player
+        for stone in self.stones:
+            stone.player = white_player if stone.value == WHITE_VALUE else black_player
         self.black_player = black_player
         self.white_player = white_player
         self.canvas.itemconfigure(self.name_white, text=white_player.name)
@@ -149,6 +146,8 @@ class ChessBoard:
         self.begin_timer()
         self.canvas.bind('<Button-1>', self.onclick)
         self.start_btn_text.set('restart')
+        self.white_player.start()
+        self.black_player.start()
         self.play()
 
     def play(self):
@@ -156,11 +155,13 @@ class ChessBoard:
         if self.current_player.is_humman():
             return
         board = self.board()
-        self.current_player.play(board, self._play)
+        self.current_player.play(board)
 
     def _play(self, board, player, from_, to_, p):
         logger.info('from:%s, to_:%s', from_, to_)
+        logger.info('p:\n%s', p)
         valid_action = rule.valid_action(board, player)
+        logger.info('valid_action:\n%s', valid_action)
         self.show_qtext(p, valid_action)
         self.show_select(from_, to_)
         stone = self.stone(from_)
@@ -171,9 +172,9 @@ class ChessBoard:
                 bd = self.board()
                 pl = -player
                 op = self.current_player.predict_opponent(bd)
-                if op:
+                if op is not None:
                     valid = rule.valid_action(bd, pl)
-                    self.show_qtext(op, valid)
+                    self.show_qtext(op, valid, hide=False)
                 # 对手走棋
                 self.switch_player_and_play()
             elif result == rule.WIN:
@@ -181,106 +182,15 @@ class ChessBoard:
                 self.game_over(stone.player)
         self.play_timer = self.window.after(int(self.period * 1000), play_later)
 
-    def show_select(self, from_, to_):
-        """
-        显示选择的动作
-        """
-        self.hide_select()
-        a = np.subtract(to_, from_)
-        logger.debug('select action is: %s', tuple(a))
-        i,j = from_
-        x,y = np.array([self.w * (j + 1), self.w * (i + 1)]) + np.array(a)[::-1] * 25
-        self.action_select_signal = self.create_oval(x, y, r=13, outline='#FFB90F', width=2)
-
-    def hide_select(self):
-        """
-        隐藏选择的动作
-        """
-        self.canvas.delete(self.action_select_signal)
-
-    def create_oval(self, x, y, r, **config):
-        return self.canvas.create_oval(x - r, y - r, x + r, y + r, **config)
-
-    def show_qtext(self, qtable, valid_action):
-        """
-        显示动作的Q值
-        """
-        maxq = np.max(qtable)
-        avgq = qtable.sum() / valid_action.sum()
-        idx = np.argwhere(valid_action == 1)
-        for i,j,k in idx:
-            q = qtable[i,j,k]
-            qtext = self.qtext(i,j,k)
-            stone = self.stone((i,j))
-            self.canvas.itemconfigure(qtext, text=str(round(q,2)).replace('0.', '.'), fill='red' if q==maxq else ('#BF3EFF' if q > avgq else 'green'), state=tk.NORMAL)
-            self.canvas.tag_raise(qtext, stone.oval)
-        self.hide_qtext(valid_action)
-
-    def hide_qtext(self, valid_action=None):
-        """
-        隐藏动作的Q值
-        """
-        if valid_action is None:
-            valid_action = np.zeros((5,5,4))
-        idx = np.argwhere(valid_action == 0)
-        for i,j,k in idx:
-            self.canvas.itemconfigure(self.qtext(i,j,k), text='', state=tk.HIDDEN)
-
-    def qtext(self, i, j, k):
-        return self._qtext[i][j][k]
-
-    def clear(self):
-        for board_row in self._stone:
-            for s in board_row:
-                if s is not None:
-                    self.del_stone(s)
-        if self.timer:
-            self.cancel_timer()
-        if self.play_timer:
-            self.window.after_cancel(self.play_timer)
-        if self.replay_timer:
-            self.replay_timer.cancel()
-        self.hide_signal()
-        self.hide_winner()
-        self.hide_qtext()
-        self.hide_select()
-        self.start_btn_text.set('start')
-        self.pause_text.set('pause')
-        self.show_message('')
-        self.black_player = None
-        self.white_player = None
-        self.current_player = None
-        self.current_stone = None
-        self.timer = None
-        self.winner = None
-        self.ended = False
-        self.record.clear()
-
     def init_stone(self, board=None):
         if board is None:
             board = np.zeros((5,5))
             board[0,:] = -1
             board[4,:] = 1
-        logger.info('init board is: \n%s', board)
-        stone, canvas, w, r, row, col = self._stone, self.canvas, self.w, self.r, self.row, self.col
         for i,j in np.argwhere(board == WHITE_VALUE):
-            self.stone((i,j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#EEE', outline='#EEE'), value=WHITE_VALUE))
+            self.create_stone(i, j, WHITE_VALUE)
         for i, j in np.argwhere(board == BLACK_VALUE):
-            self.stone((i, j), value=Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill='#111', outline='#111'), value=BLACK_VALUE))
-
-    def game_over(self, winner):
-        # self.lb.config(text='winner is: ' + str(winner))
-        self.winner = winner
-        self.ended = True
-        self.canvas.unbind('<Button-1>')
-        self.cancel_timer()
-        self.hide_signal()
-        self.show_winner()
-        self.start_btn_text.set('start')
-        self.record_path.set(self.record.save('records/app/' + winner.name + '_'))
-        self.record.clear()
-        self.white_player.stop()
-        self.black_player.stop()
+            self.create_stone(i, j, BLACK_VALUE)
 
     def onmotion(self, event):
         self.show_message('position is (%d,%d)' % (event.x, event.y))
@@ -340,11 +250,6 @@ class ChessBoard:
             self.opponent().opponent_play(None, None, None)
             self.game_over(stone.player)
 
-    def opponent(self, player=None):
-        if player is None:
-            player = self.current_player
-        return self.players[-player.stone_val]
-
     def move_to(self, stone, to_loc):
         """
         把棋子移动到to_loc处，同时判断是否吃子
@@ -374,8 +279,8 @@ class ChessBoard:
         self.event.set()
         record = Record()
         record.read(recordpath)
-        board = record[0][0]
-        self.init_stone(board)
+        init_board = record[0][0]
+        self.init_stone(init_board)
         record_iter = iter(record)
         length = len(record)
         record.n = 1
@@ -437,22 +342,77 @@ class ChessBoard:
     def move_to_pos(self, stone, x, y):
         self.canvas.coords(stone.oval, x - self.r, y - self.r, x + self.r, y + self.r)
 
+    def opponent(self, player=None):
+        if player is None:
+            player = self.current_player
+        return self.players[-player.stone_val]
+
     def stone(self, loc, value=Stone.NONE):
         i,j = loc
         if value != Stone.NONE:
-            self._stone[i][j] = value
+            self._board[i][j] = value
             if value is not None:
                 value.loc = loc
-        return self._stone[i][j]
+        return self._board[i][j]
 
+    def create_stone(self, i, j, value):
+        w, r = self.w, self.r
+        color = '#EEE' if value == WHITE_VALUE else '#111'
+        s = Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill=color, outline=color), value=value)
+        self.stone((i, j), value=s)
+        self.stones.append(s)
     def pos_to_loc(self, x, y):
         i = int(y / self.w - 0.5)
         j = int(x / self.w - 0.5)
         if -1 < i < 5 and -1 < j < 5:
             return i,j
 
+    def clear(self):
+        for s in self.stones:
+            self.del_stone(s)
+        self.stones.clear()
+        if self.timer:
+            self.cancel_timer()
+        if self.play_timer:
+            self.window.after_cancel(self.play_timer)
+        if self.replay_timer:
+            self.replay_timer.cancel()
+        self.hide_signal()
+        self.hide_winner()
+        self.hide_qtext()
+        self.hide_select()
+        self.start_btn_text.set('start')
+        self.pause_text.set('pause')
+        self.show_message('')
+        if self.black_player:
+            self.black_player.stop()
+            self.black_player = None
+        if self.white_player:
+            self.white_player.stop()
+            self.white_player = None
+        self.current_player = None
+        self.current_stone = None
+        self.timer = None
+        self.winner = None
+        self.ended = False
+        self.record.clear()
+
+    def game_over(self, winner):
+        # self.lb.config(text='winner is: ' + str(winner))
+        self.winner = winner
+        self.ended = True
+        self.canvas.unbind('<Button-1>')
+        self.cancel_timer()
+        self.hide_signal()
+        self.show_winner()
+        self.start_btn_text.set('start')
+        self.record_path.set(self.record.save('records/app/' + winner.name + '_'))
+        self.record.clear()
+        self.white_player.stop()
+        self.black_player.stop()
+
     def board(self):
-        return np.array([[0 if s is None else s.value for s in row] for row in self._stone])
+        return np.array([[0 if s is None else s.value for s in row] for row in self._board])
 
     def begin_timer(self):
         self.current_player.begin_time = int(time.time())
@@ -470,6 +430,57 @@ class ChessBoard:
     def change_period(self, scale):
         self.period *= scale
         logger.debug(self.period)
+
+    def show_select(self, from_, to_):
+        """
+        显示选择的动作
+        """
+        self.hide_select()
+        a = np.subtract(to_, from_)
+        logger.debug('select action is: %s', tuple(a))
+        i, j = from_
+        x, y = np.array([self.w * (j + 1), self.w * (i + 1)]) + np.array(a)[::-1] * 25
+        self.action_select_signal = self.create_oval(x, y, r=13, outline='#FFB90F',
+                                                     width=2)
+
+    def hide_select(self):
+        """
+        隐藏选择的动作
+        """
+        self.canvas.delete(self.action_select_signal)
+
+    def create_oval(self, x, y, r, **config):
+        return self.canvas.create_oval(x - r, y - r, x + r, y + r, **config)
+
+    def show_qtext(self, qtable, valid_action, hide=True):
+        """
+        显示动作的Q值
+        """
+        if hide:
+            self.hide_qtext(valid_action)
+        maxq = np.max(qtable)
+        avgq = qtable.sum() / valid_action.sum()
+        idx = np.argwhere(valid_action == 1)
+        logger.info(idx)
+        for i, j, k in idx:
+            q = qtable[i, j, k]
+            qtext = self.qtext(i, j, k)
+            stone = self.stone((i, j))
+            self.canvas.itemconfigure(qtext, text=str(round(q, 2)).replace('0.', '.'), fill='red' if q == maxq else ('#BF3EFF' if q > avgq else 'green'), state=tk.NORMAL)
+            self.canvas.tag_raise(qtext, stone.oval)
+
+    def hide_qtext(self, valid_action=None):
+        """
+        隐藏动作的Q值
+        """
+        if valid_action is None:
+            valid_action = np.zeros((5, 5, 4))
+        idx = np.argwhere(valid_action == 0)
+        for i, j, k in idx:
+            self.canvas.itemconfigure(self.qtext(i, j, k), text='', state=tk.HIDDEN)
+
+    def qtext(self, i, j, k):
+        return self._qtext[i][j][k]
 
     def show_message(self, message):
         self.text.config(text=message)

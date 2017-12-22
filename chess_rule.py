@@ -103,61 +103,6 @@ def judge_win_2(board, player):
     if valid_location(board, -player).sum() == 0:
         return True
 
-def feature(board, player):
-    """
-    棋局的特征
-    :param board:   棋盘
-    :param player:  当前的棋手
-    :return: 当前局面的特征(5x5x10)
-    """
-    space = (board==0).astype(np.int8).reshape((5,5,1))
-    black = (board==1).astype(np.int8).reshape((5,5,1))
-    white = (board==-1).astype(np.int8).reshape((5,5,1))
-    who = np.ones((5,5,1)) if player == 1 else np.zeros((5,5,1))
-    v_locations = valid_location(board, player).reshape((5,5,1))
-    v_actions = valid_action(board, player)
-    bias = np.ones((5,5,1))
-    return np.concatenate((space, black, white, who, v_locations, v_actions, bias), axis=2)
-
-def feature_1st(board, player):
-    """
-    第一视角的棋局特征
-    :param board:   棋盘
-    :param player:  当前的棋手
-    :return: 当前局面的特征(5x5xN)
-    """
-    space = (board==0).astype(np.int8).reshape((5,5,1))
-    self = (board==player).astype(np.int8).reshape((5,5,1))
-    opponent = (board==-player).astype(np.int8).reshape((5,5,1))
-    v_locations = valid_location(board, player).reshape((5,5,1))
-    v_actions = valid_action(board, player)
-    bias = np.ones((5,5,1))
-    return np.concatenate((space, self, opponent, v_locations, v_actions, bias), axis=2)
-
-def target(board, from_, action, reward, vp):
-    if vp[from_][action] == 1:
-        y = vp
-    else:
-        if reward > 0:
-            vp[from_][action] *= (1 + reward)
-        else:
-            vp[from_][action] /= (1 - reward)
-        s = vp.sum()
-        assert s > 0, 'sum is: %s, reward is: %s' % (s, reward)
-        y = vp / s
-    # if reward == 1:
-    #     y = np.zeros((5, 5, 4))
-    #     y[from_][action] = 1
-    # elif reward == 0:
-    #     if vp[from_][action] == 1:
-    #         y = vp
-    #     else:
-    #         vp[from_][action] = 0
-    #         y = vp / vp.sum()
-    # else:
-    #     raise ValueError('reward is: ' + str(reward))
-    return y
-
 def flip_board(board):
     return np.fliplr(np.flipud(board))
 

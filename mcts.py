@@ -3,6 +3,7 @@ import time
 from threading import Thread,Event
 from queue import Queue
 from policy_network import PolicyNetwork
+from qlearning_network import DQN
 import chess_rule as rule
 import logging
 
@@ -60,7 +61,7 @@ class Node:
         step = 0
         while True:
             try:
-                from_, action, _,_ = self.tree.worker.policy(board, player)   # worker.predict(board, player)
+                from_, action, *_ = self.tree.worker.policy(board, player)   # worker.predict(board, player)
                 command, eat = rule.move_by_action(board, from_, action)
             except Exception as e:
                 logger.info('board is:\n%s', board)
@@ -150,6 +151,7 @@ class Edge:
     def __str__(self):
         return 'a:%s,v:%s,p:%s,n:%s,w:%s,q:%s' % (self.a,self.v,self.p,self.n,self.w,self.q)
 
+
 class MCTS:
     """
     蒙特卡罗树搜索
@@ -166,8 +168,8 @@ class MCTS:
         self.depth = 0
         self.n_node = 0
         self.n_search = 0
-        self.policy = PolicyNetwork.load('model/model_149/convolution_policy_network_5995.model')
-        self.worker = self.policy
+        self.policy = DQN.load('model/qlearning_network/DQN_sigmoid_6000.model')
+        self.worker = DQN.load('model/qlearning_network/DQN_dr_3000.model')
         self.root = Node(board, player, tree=self)
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
         self.root.expansion()
@@ -182,7 +184,7 @@ class MCTS:
             self.root.search()
             self.n_search += 1
             self.worker.clear()
-            self.worker.ntrain += 1
+            self.worker.episode += 1
             logger.info('search %s', self.n_search)
         logger.info('search over')
         self.n_search = 0
@@ -265,12 +267,11 @@ class MCTS:
 
 
 class COMMAND:
-    pass
-COMMAND.SEARCH = 'SEARCH'
-COMMAND.MOVE_DOWN = 'MOVE_DOWN'
-COMMAND.PREDICT = 'PREDICT'
-COMMAND.STOP = 'STOP'
-COMMAND.STOP_SEARCH = 'STOP_SEARCH'
+    SEARCH = 'SEARCH'
+    MOVE_DOWN = 'MOVE_DOWN'
+    PREDICT = 'PREDICT'
+    STOP = 'STOP'
+    STOP_SEARCH = 'STOP_SEARCH'
 
 
 class MCTSWorker:
