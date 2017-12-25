@@ -157,7 +157,7 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, expansion_gate=50, lambda_=0.5, max_search=1000, max_search_time=600):
+    def __init__(self, board, player, policy_model, worker_model, expansion_gate=50, lambda_=0.5, max_search=1000, max_search_time=600):
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
         self.max_search = max_search            # 最大的搜索次数
@@ -168,8 +168,8 @@ class MCTS:
         self.depth = 0
         self.n_node = 0
         self.n_search = 0
-        self.policy = DQN.load('model/qlearning_network/DQN_sigmoid_6000.model')
-        self.worker = DQN.load('model/qlearning_network/DQN_dr_3000.model')
+        self.policy = DQN.load(policy_model)
+        self.worker = DQN.load(worker_model)
         self.root = Node(board, player, tree=self)
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
         self.root.expansion()
@@ -275,10 +275,10 @@ class COMMAND:
 
 
 class MCTSWorker:
-    def __init__(self, board, first_player, max_search=1000, expansion_gate=50):
+    def __init__(self, board, first_player, policy_model, worker_model, max_search=1000, expansion_gate=50):
         self.command_queue = Queue()
         self.result_queue = Queue()
-        self.ts =  MCTS(board, first_player, max_search=max_search, expansion_gate=expansion_gate)
+        self.ts =  MCTS(board, first_player, policy_model, worker_model, max_search=max_search, expansion_gate=expansion_gate)
         self.ts.show_info()
         Thread(target=self.start).start()
 

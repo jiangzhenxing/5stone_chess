@@ -33,7 +33,7 @@ class Record:
                 rc[3] += player_rewards[player] * self.gamma
                 player_rewards[player] = rc[3]
 
-    def add(self, board, from_, action, reward, vp=None, win=False):
+    def add1(self, board, from_, action, reward, vp=None, win=False):
         """
         吃子有回报，赢了有额外奖励
         """
@@ -69,6 +69,8 @@ class Record:
             for record in self.records:
                 b, f_, _,_,_ = record
                 record[3] += 1 if b[f_] == winner else -1
+
+    add = add1
 
     def add2(self, board, from_, action, reward, vp=None, win=False):
         """

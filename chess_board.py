@@ -6,6 +6,7 @@ import chess_rule as rule
 from tkinter import font
 from tkinter import messagebox
 from tkinter import filedialog
+from tkinter import ttk
 from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer,MCTSPlayer
 from record import Record
 import logging
@@ -31,7 +32,7 @@ class ChessBoard:
     def __init__(self):
         window = tk.Tk()
         window.title('五子棋')
-        window.geometry('600x700')
+        window.geometry('600x720')
 
         w = 100 # 棋格宽度
         r = 35  # 棋子半径
@@ -68,31 +69,56 @@ class ChessBoard:
         self.clock_white = canvas.create_text(w*6-40, 30, text='00:00', fill='#EEE', font=font.Font(family='Times', size=20))
         self.clock_black = canvas.create_text(w*6-40, w * 6 - 30, text='00:00', fill='#111', font=font.Font(family='Times', size=20))
 
+        # ----------------- 第一排按扭 -----------------------------------------
+        # 对手选择
+        tk.Label(window, text='请选择对手:').place(x=10, y=620)
+        player_var = tk.StringVar()
+        player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_sigmoid_112w.model'}),
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/qlearning_network/DQN_sigmoid_112w.model', 'worker_model':'model/qlearning_network/DQN_sigmoid_112w.model'}),]
+        self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
+        players = [n for n, *_ in player_classes]
+        player_choosen = ttk.Combobox(window, width=18, textvariable=player_var, values=players, state='readonly')
+        player_choosen.current(0)
+        player_choosen.place(x=90, y=617)
+        self.player_var = player_var
+
+        # 先手
+        first_player = tk.IntVar(value=BLACK_VALUE)
+        tk.Radiobutton(window, text='黑先', variable=first_player, value=BLACK_VALUE).place(x=290, y=620)
+        tk.Radiobutton(window, text='白先', variable=first_player, value=WHITE_VALUE).place(x=345, y=620)
+        self.first_player = first_player
+
         # 开始按扭
         start_btn_text = tk.StringVar(window, value='start')
-        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=10, y=620)
+        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=415, y=617)
+
+        # 帮助按扭
+        tk.Button(window, text='help', command=None).place(x=510, y=617)
+
+        # ---------------- 第二排按扭 ------------------------------------------
+        # 选择棋谱
+        tk.Label(window, text='棋谱:').place(x=10, y=658)
+        record_path = tk.StringVar()
+        record_entry = tk.Entry(window, textvariable=record_path, width=18)
+        record_entry.place(x=45, y=655)
+        tk.Button(text='select', command=self.select_record).place(x=222, y=655)
 
         # replay按扭
-        tk.Button(window, text='replay', command=self.replay).place(x=80, y=620)
-
-        # 选择棋谱
-        tk.Label(window, text='棋谱:').place(x=150, y=623)
-        record_path = tk.StringVar()
-        record_entry = tk.Entry(window, textvariable=record_path, width=10)
-        record_entry.place(x=185, y=620)
-        tk.Button(text='open', command=self.select_record).place(x=285, y=620)
+        tk.Button(window, text='replay', command=self.replay).place(x=290, y=655)
 
         # 速度调节按扭
-        tk.Button(window, text='faster', command=lambda:self.change_period(0.5)).place(x=350, y=620)
-        tk.Button(window, text='slower', command=lambda:self.change_period(2)).place(x=420, y=620)
+        tk.Button(window, text='faster', command=lambda:self.change_period(0.5)).place(x=360, y=655)
+        tk.Button(window, text='slower', command=lambda:self.change_period(2)).place(x=430, y=655)
 
         # 暂停按扭
         pause_text = tk.StringVar(value='pause')
-        tk.Button(window, textvariable=pause_text, command=self.pause, width=5).place(x=500, y=620)
+        tk.Button(window, textvariable=pause_text, command=self.pause, width=5).place(x=510, y=655)
 
+        # ---------------- 第三排按扭 ------------------------------------------
         # 消息显示
         lb = tk.Label(window, width=40)
-        lb.place(x=85, y=650)
+        lb.place(x=85, y=690)
 
         self.w = w
         self.r = r
@@ -128,10 +154,14 @@ class ChessBoard:
                 return
         self.clear()
         self.init_stone()
-        first_player = WHITE_VALUE
-        white_player = PolicyNetworkPlayer('Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/policy_network/convolution_4500.model')
-        # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/qlearning_network/DQN_dr_6000.model')
-        # white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/DQN_0090.model', init_board=self.board(), first_player=first_player)
+        init_board = self.board()
+        first_player = self.first_player.get()
+        player_name = self.player_var.get()
+        player_class, p, kp = self.player_map[player_name]
+        white_player = player_class(*p, **kp)
+        # white_player = PolicyNetworkPlayer('Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/policy_network/convolution_6000.model')
+        # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/qlearning_network/DQN_dr_3000.model')
+        # white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/DQN_0090.model', )
         black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
         self.players[WHITE_VALUE] = white_player
         self.players[BLACK_VALUE] = black_player
@@ -146,8 +176,8 @@ class ChessBoard:
         self.begin_timer()
         self.canvas.bind('<Button-1>', self.onclick)
         self.start_btn_text.set('restart')
-        self.white_player.start()
-        self.black_player.start()
+        self.white_player.start(init_board=init_board, first_player=first_player)
+        self.black_player.start(init_board=init_board, first_player=first_player)
         self.play()
 
     def play(self):
@@ -193,13 +223,13 @@ class ChessBoard:
             self.create_stone(i, j, BLACK_VALUE)
 
     def onmotion(self, event):
-        self.show_message('position is (%d,%d)' % (event.x, event.y))
+        # self.show_message('position is (%d,%d)' % (event.x, event.y))
         self.move_to_pos(self.current_stone, event.x, event.y)
 
     def onclick(self, event):
         x,y = event.x, event.y
         if  not (self.w - self.r < x < self.w * 5 + self.r and self.w - self.r < y < self.w * 5 + self.r):
-            self.show_message('click at (%d,%d)' % (event.x, event.y))
+            # self.show_message('click at (%d,%d)' % (event.x, event.y))
             return
         if not self.current_player.is_humman():
             return
@@ -212,7 +242,7 @@ class ChessBoard:
         posx_d = posx - posx_i
         posy_d = posy - posy_i
 
-        self.show_message('click at (%d,%d) position is %d,%d' % (event.x, event.y, posx_i, posy_i))
+        # self.show_message('click at (%d,%d) position is %d,%d' % (event.x, event.y, posx_i, posy_i))
 
         if 0.25 < posx_d < 0.75 and 0.25 < posy_d < 0.75:
             loc = self.pos_to_loc(x, y)
@@ -461,7 +491,7 @@ class ChessBoard:
         maxq = np.max(qtable)
         avgq = qtable.sum() / valid_action.sum()
         idx = np.argwhere(valid_action == 1)
-        logger.info(idx)
+        # logger.info(idx)
         for i, j, k in idx:
             q = qtable[i, j, k]
             qtext = self.qtext(i, j, k)

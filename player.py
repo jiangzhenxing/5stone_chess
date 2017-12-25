@@ -42,7 +42,7 @@ class Player:
         """
         pass
 
-    def start(self):
+    def start(self, init_board, first_player):
         """
         启动
         """
@@ -155,14 +155,13 @@ class DQNPlayer(ComputerPlayer):
         return q_table
 
 class MCTSPlayer(ComputerPlayer):
-    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, modelfile, init_board, first_player):
-        ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock, play_func, modelfile)
+    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, policy_model, worker_model):
+        ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock, play_func, None)
+        self.policy_model = policy_model
+        self.worker_model = worker_model
         conn1, conn2 = Pipe()
         self.player_end = conn1
         self.mcts_end = conn2
-        self.init_board = init_board
-        self.first_player = first_player
-
 
     def load_model(self):
         return None
@@ -201,17 +200,16 @@ class MCTSPlayer(ComputerPlayer):
             action = rule.flip_action(action)
         self.player_end.send((board, player, action))
 
-    def start(self):
-        Process(target=self._start).start()
+    def start(self, init_board, first_player):
+        Process(target=self._start, args=(init_board, first_player)).start()
 
-    def _start(self):
+    def _start(self, init_board, first_player):
         logger.info('start...')
-        from mcts import MCTSWorker
-        board = self.init_board
-        if self.first_player == -1:
-            board = rule.flip_board(board)
-        ts_worker = MCTSWorker(board, self.first_player, max_search=200, expansion_gate=10)
-        if self.first_player != self.stone_val:
+        from mcts0 import MCTSWorker
+        if first_player == -1:
+            init_board = rule.flip_board(init_board)
+        ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, max_search=300, expansion_gate=10)
+        if first_player != self.stone_val:
             # 对手走棋时，开始搜索
             ts_worker.begin_search()
         while True:

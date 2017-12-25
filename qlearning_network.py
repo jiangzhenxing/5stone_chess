@@ -77,13 +77,10 @@ class DQN:
             model.add(Dense(units=1,
                             activation='linear',
                             kernel_initializer='zeros',
+                            kernel_regularizer=l2(l),
                             bias_initializer='zeros',
+                            bias_regularizer=l2(l)
                             ))
-            # 定义优化器
-            # opt = Adam(lr=1e-4)
-            opt = SGD(lr=1e-3)
-            # loss function
-            loss = 'mes'
         elif self.output_activation == 'sigmoid':
             model.add(Dense(units=1,
                             activation='sigmoid',
@@ -92,11 +89,11 @@ class DQN:
                             bias_initializer='zeros',
                             bias_regularizer=l2(l)
                             ))
-            # 定义优化器
-            # opt = Adam(lr=1e-4)
-            opt = SGD(lr=1e-3)
-            # loss function
-            loss = 'binary_crossentropy'
+        # 定义优化器
+        # opt = Adam(lr=1e-4)
+        opt = SGD(lr=1e-3)
+        # loss function
+        loss = 'mse' if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
         return model
 
@@ -246,7 +243,7 @@ class DQN:
 
 
 # @print_use_time()
-def simulate(nw0, nw1, init='fixed'):
+def simulate(nw0, nw1, activation, init='fixed'):
     board = rule.init_board() if init=='fixed' else rule.random_init_board()
     player = 1
     records = Record()
@@ -259,8 +256,14 @@ def simulate(nw0, nw1, init='fixed'):
             to_ = tuple(np.add(from_, rule.actions_move[action]))
             command,eat = rule.move(board, from_, to_)
             reward = len(eat)
-            records.add3(bd, from_, action, reward, win=command==rule.WIN)
+            if activation == 'sigmoid':
+                records.add3(bd, from_, action, reward, win=command==rule.WIN)
+            elif activation == 'linear':
+                records.add1(bd, from_, action, reward, win=command==rule.WIN)
+            else:
+                raise ValueError
         except NoActionException:
+            # 随机初始化局面后一方无路可走
             return Record(),0
         except Exception as e:
             logging.info('board is:\n%s', board)
@@ -282,9 +285,9 @@ def simulate(nw0, nw1, init='fixed'):
         board = rule.flip_board(board)
 
 @print_use_time()
-def train_once(n0, n1, i, init='fixed'):
+def train_once(n0, n1, i, activation, init='fixed'):
     logging.info('train: %d', i)
-    records, winner = simulate(n0, n1, init)
+    records, winner = simulate(n0, n1, activation, init)
     if records.length() == 0:
         return
     if i%1000==0:
@@ -301,15 +304,15 @@ def train_once(n0, n1, i, init='fixed'):
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
-    activation = 'sigmoid'
+    activation = 'linear' # ''sigmoid'
     n0 = DQN(output_activation=activation)
     n1 = DQN(output_activation=activation)
     n1.copy(n0)
-    episode = 2000000
+    episode = 10000000
     for i in range(episode+1):
-        train_once(n0, n1, i, init='random')
+        train_once(n0, n1, i, activation, init='random')
         if i % 10000 == 0:
-            n0.save_model('model/qlearning_network/DQN_%s_%05d.model' % (activation, i // 10000))
+            n0.save_model('model/qlearning_network/DQN_%s_%05dw.model' % (activation, i // 10000))
     # for i in range(episode+1, episode*2 + 1, 1):
     #     train_once(n0, n1, i, init='fixed')
     #     if i % 1000 == 0:
