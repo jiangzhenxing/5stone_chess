@@ -211,7 +211,8 @@ class DQN:
     @staticmethod
     def value_to_probs(values):
         values = np.array(values)
-        x = np.log(values) - np.log(1.0001 - values)
+        # 对values进行少量加减，以防止出现0
+        x = np.log(0.0001 + values) - np.log(1.0001 - values)
         y = np.e ** x
         return y / y.sum()
 

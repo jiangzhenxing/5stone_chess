@@ -8,6 +8,7 @@ import chess_rule as rule
 import logging
 
 logger = logging.getLogger('train')
+logger_tree = logging.getLogger('tree')
 
 # policy = PolicyNetwork.load('model/model_149/convolution_policy_network_5995.model')
 # worker = policy
@@ -43,7 +44,7 @@ class Node:
             value = e.v
             player = self.player
             logger.info('level:%s, value:%s, player:%s', self.level, value, player)
-        elif self.level > 100:
+        elif self.level > 1000:
             e = self.selection()
             value = e.v
             player = self.player
@@ -60,9 +61,9 @@ class Node:
             if pe.upper_node.player != player:
                 value = 1 - value
             pe.n += 1
-            v0 = pe.v
+            # v0 = pe.v
             pe.v = pe.v + (value - pe.v) / pe.n
-            logger.info('player:%s, value:%s, old v:%s, new v:%s', pe.upper_node.player, value, v0, pe.v)
+            # logger.info('player:%s, value:%s, old v:%s, new v:%s', pe.upper_node.player, value, v0, pe.v)
 
     def selection(self):
         """
@@ -75,11 +76,11 @@ class Node:
 
     def expansion(self, walked):
         board,player = self.board, self.player
-        actions_ = rule.valid_actions(board, player)
-        # actions_ = list(filter(lambda a:(self.board_str, player, a) not in walked, actions))
-        # if len(actions_) == 0:
-        #     全部已经走过，重新选
-            # actions_ = actions
+        actions = rule.valid_actions(board, player)
+        actions_ = list(filter(lambda a:(self.board_str, player, a) not in walked, actions))
+        if len(actions_) == 0:
+            # 全部已经走过，重新选
+            actions_ = actions
         values = [self.tree.policy.q(board, from_, act) for from_,act in actions_]
         for action,value in zip(actions_, values):
             e = Edge(upper_node=self, a=action, v=value, p=0, lambda_=self.tree.lambda_)
@@ -206,7 +207,27 @@ class MCTS:
         return action, q
 
     def move_down(self, board, player, action):
-        pass
+        assert np.all(self.root.board == board), 'root_board:\n' + str(
+            self.root.board) + '\nboard:\n' + str(board)
+        assert self.root.player == player, 'root_player:%s, player:%s' % (
+        self.root.player, player)
+        node = self.get_node(action)
+        logger.debug('get_node(%s):\n%s', action, node)
+        if node is None:
+            logger.info('node is None, new Node()')
+            board = board.copy()
+            rule.move_by_action(board, *action)
+            node = Node(rule.flip_board(board), -player, tree=self)
+        if not node.expanded:
+            node.expansion(set())
+        self.root = node
+        self.root.parent_edge = None
+        self.root.level = 1
+        self.n_node = 1
+        self.depth = 1
+        self.update_tree_info(self.root)
+        logger.info('move down to node:%s', action)
+        self.show_info()
 
     def update_tree_info(self, node):
         for e in node.sub_edge:
@@ -233,10 +254,10 @@ class MCTS:
         info = '\n------------- tree info --------------\n' \
                'depth:%s, n_node:%s\n' \
                'root is:\n%s'
-        logger.info(info, self.depth, self.n_node, self.root)
+        logger_tree.info(info, self.depth, self.n_node, self.root)
         for e in self.root.sub_edge:
-            logger.info('edge:%s, v:%s, p:%s, N:%s, q:%s', e.a, e.v, e.p, e.n, e.q())
-            logger.debug(e.down_node)
+            logger_tree.info('edge:%s, v:%s, p:%s, N:%s, q:%s', e.a, e.v, e.p, e.n, e.q())
+            logger_tree.debug(e.down_node)
 
 
 class COMMAND:

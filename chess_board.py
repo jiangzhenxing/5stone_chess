@@ -25,8 +25,8 @@ class Stone:
         self.oval = oval
         self.value = value
         self.player = player
-
 Stone.NONE = Stone(None,None,None)
+
 
 class ChessBoard:
     def __init__(self):
@@ -74,8 +74,8 @@ class ChessBoard:
         tk.Label(window, text='请选择对手:').place(x=10, y=620)
         player_var = tk.StringVar()
         player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
-                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_sigmoid_112w.model'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/qlearning_network/DQN_sigmoid_112w.model', 'worker_model':'model/qlearning_network/DQN_sigmoid_112w.model'}),]
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_sigmoid_00169.model'}),
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/qlearning_network/DQN_sigmoid_00169.model', 'worker_model':'model/qlearning_network/DQN_sigmoid_00169.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=18, textvariable=player_var, values=players, state='readonly')
@@ -159,7 +159,7 @@ class ChessBoard:
               [0,-1, 0, 0, 0],
               [0, 0, 0, 0, 0],]
         # bd = -np.array(bd)
-        self.init_stone(bd)
+        self.init_stone()
         init_board = self.board()
         first_player = self.first_player.get()
         player_name = self.player_var.get()
