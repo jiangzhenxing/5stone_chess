@@ -1,8 +1,9 @@
 import numpy as np
-from keras.models import Sequential, load_model
-from keras.layers import Dense,Convolution2D,Flatten
+from keras.models import Model, Sequential, load_model
+from keras.layers import Input, Dense, Convolution2D, Activation, Flatten
 from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
+from keras.layers.merge import add
 import chess_rule as rule
 from util import add_print_time_fun, print_use_time
 from record import Record
@@ -15,11 +16,9 @@ class NoActionException(BaseException):
     pass
 
 
-class DQN:
+class ValueNetwork:
     """
-    q = 1 if win else 0
-    value = r0 - r'0 + γr1 - γr'1 + ...
-    value(s0) = r0 - r'0 + γvalue(s1)
+    v = 1 if win else 0
     """
     def __init__(self, epsilon=1.0, epsilon_decay=0.15, output_activation='linear', filepath=None):
         self.output_activation = output_activation
@@ -36,64 +35,73 @@ class DQN:
         self.model = load_model(filepath) if filepath else self.create_model()
 
     def create_model(self):
-        # 定义顺序模型
-        model = Sequential()
+        def identity_block(x, nb_filter, kernel_size=3):
+            k1, k2, k3 = nb_filter
+            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='relu')(x)
+            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='relu')(y)
+            y = Convolution2D(filters=k3, kernel_size=1, strides=1)(y)
+            y = add([x,y])
+            return Activation('relu')(y)
+
+        def conv_block(x, nb_filter, kernel_size=3):
+            k1, k2, k3 = nb_filter
+            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='relu')(x)
+            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='relu')(y)
+            y = Convolution2D(filters=k3, kernel_size=1, strides=1)(y)
+            x = Convolution2D(filters=k3, kernel_size=1, strides=1)(x)
+            y = add([x,y])
+            return Activation('relu')(y)
+
         l = 1e-3
+        # 输入层
+        input_ = Input(shape=(5,5,5))
+
         # 第一个卷积层
-        model.add(Convolution2D(
+        out = Convolution2D(
             filters=100,        # 卷积核/滤波器个数
             kernel_size=3,      # 卷积窗口大小
-            input_shape=(5,5,10),  # 输入平面的形状
+            input_shape=(5,5,5),  # 输入平面的形状
             strides=1,          # 步长
             padding='same',     # padding方式 same:保持图大小不变/valid
             activation='relu',  # 激活函数
-            # kernel_regularizer=l2(l),
-            # bias_regularizer=l2(l)
-        ))
+        )(input_)
 
-        def create_conv_layer(filters=50, kernel_size=3):
-            return Convolution2D(filters=filters,
-                                 kernel_size=kernel_size,
-                                 strides=1,
-                                 padding='same',
-                                 activation='relu',
-                                 )
-        # 第二个卷积层
-        model.add(create_conv_layer())
-        # 第三个卷积层
-        model.add(create_conv_layer())
-        # 第四个卷积层
-        model.add(create_conv_layer())
-        # 第五个卷积层
-        model.add(create_conv_layer(filters=25, kernel_size=1))
-        # 把卷积层的输出扁平化为1维
-        model.add(Flatten())
-        # 全连接层
-        model.add(Dense(units=100,
-                        activation='relu',
-                        ))
-        # 输出Q值
+        out = identity_block(out, (100,100,100))
+        out = identity_block(out, (100, 100, 100))
+        out = conv_block(out, (50,50,50))
+        out = identity_block(out, (50, 50, 50))
+        out = identity_block(out, (50, 50, 50))
+        out = identity_block(out, (50, 50, 50))
+        out = conv_block(out, (50, 50, 50))
+        out = identity_block(out, (50, 50, 50))
+        out = identity_block(out, (50, 50, 50))
+        out = identity_block(out, (50, 50, 50))
+        out = Flatten()(out)
+        # out = Dense(units=100, activation='relu')(out)
+
+        # 输出价值
         if self.output_activation == 'linear':
-            model.add(Dense(units=1,
-                            activation='linear',
-                            kernel_initializer='zeros',
-                            kernel_regularizer=l2(l),
-                            bias_initializer='zeros',
-                            bias_regularizer=l2(l)
-                            ))
+            out = Dense(units=1,
+                        activation='linear',
+                        kernel_initializer='zeros',
+                        kernel_regularizer=l2(l),
+                        bias_initializer='zeros',
+                        bias_regularizer=l2(l)
+                        )(out)
         elif self.output_activation == 'sigmoid':
-            model.add(Dense(units=1,
-                            activation='sigmoid',
-                            kernel_initializer='zeros',
-                            kernel_regularizer=l2(l),
-                            bias_initializer='zeros',
-                            bias_regularizer=l2(l)
-                            ))
+            out = Dense(units=1,
+                        activation='sigmoid',
+                        kernel_initializer='zeros',
+                        kernel_regularizer=l2(l),
+                        bias_initializer='zeros',
+                        bias_regularizer=l2(l)
+                        )(out)
+        model = Model(inputs=input_, outputs=out)
         # 定义优化器
         # opt = Adam(lr=1e-4)
         opt = SGD(lr=1e-3)
         # loss function
-        loss = 'mse' if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
+        loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
         return model
 
@@ -108,26 +116,17 @@ class DQN:
         """
         player = board[from_]
         to_ = tuple(np.add(from_, rule.actions_move[action]))
-        # 棋盘特征:空白-己方棋子-对方棋子
-        space = (board == 0).astype(np.int8).reshape((5, 5, 1))
-        self = (board == player).astype(np.int8).reshape((5, 5, 1))
-        opponent = (board == -player).astype(np.int8).reshape((5, 5, 1))
-        # 动作特征
-        from_location = np.zeros((5,5,1))
-        from_location[from_] = 1
-        to_location = np.zeros((5,5,1))
-        to_location[to_] = 1
         # 走子后的棋盘
         board = board.copy()
         result,_ = rule.move(board, from_, to_)
-        space2 = (board == 0).astype(np.int8).reshape((5, 5, 1))
-        self2 = (board == player).astype(np.int8).reshape((5, 5, 1))
-        opponent2 = (board == -player).astype(np.int8).reshape((5, 5, 1))
+        space = (board == 0).astype(np.int8).reshape((5, 5, 1))
+        self = (board == player).astype(np.int8).reshape((5, 5, 1))
+        opponent = (board == -player).astype(np.int8).reshape((5, 5, 1))
         # 走子后是否赢棋
         is_win = np.ones((5,5,1)) if result == rule.WIN else np.zeros((5,5,1))
         # 偏置
         bias = np.ones((5, 5, 1))
-        return np.concatenate((space, self, opponent, from_location, to_location, space2, self2, opponent2, is_win, bias), axis=2)
+        return np.concatenate((space, self, opponent, is_win, bias), axis=2)
 
     def q(self, board, from_, action):
         x = self.feature(board, from_, action)
@@ -232,7 +231,7 @@ class DQN:
 
     @staticmethod
     def load(modelfile, epsilon=0.3):
-        return DQN(epsilon=epsilon, filepath=modelfile)
+        return ValueNetwork(epsilon=epsilon, filepath=modelfile)
 
     def set_pre(self, q, valid, vq):
         self.q_value = q
@@ -252,11 +251,13 @@ class DQN:
 # @print_use_time()
 def simulate(nw0, nw1, activation, init='fixed'):
     board = rule.init_board() if init=='fixed' else rule.random_init_board()
-    player = 1
+    player = 1 if np.random.random() > 0.5 else -1
     records = Record()
     while True:
         nw = nw0 if player == 1 else nw1
         try:
+            if init == 'fixed' and player == -1:
+                board = rule.flip_board(board)
             bd = board.copy()
             from_, action = nw.policy(board, player)
             assert board[from_] == player
@@ -266,7 +267,7 @@ def simulate(nw0, nw1, activation, init='fixed'):
             if activation == 'sigmoid':
                 records.add3(bd, from_, action, reward, win=command==rule.WIN)
             elif activation == 'linear':
-                records.add1(bd, from_, action, reward, win=command==rule.WIN)
+                records.add2(bd, from_, action, reward, win=command==rule.WIN)
             else:
                 raise ValueError
         except NoActionException:
@@ -289,7 +290,8 @@ def simulate(nw0, nw1, activation, init='fixed'):
             logging.info('走子数过多: %s', records.length())
             return Record(),0
         player = -player
-        board = rule.flip_board(board)
+        # if init == 'random':
+        #     board = rule.flip_board(board)
 
 @print_use_time()
 def train_once(n0, n1, i, activation, init='fixed'):
@@ -298,7 +300,7 @@ def train_once(n0, n1, i, activation, init='fixed'):
     if records.length() == 0:
         return
     if i%1000==0:
-        records.save('records/train/qlearning_network/1st_')
+        records.save('records/train/value_network/' + ('1st_' if init == 'fixed' else ''))
     n1.copy(n0)
     n0.train(records, epochs=1)
     n0.clear()
@@ -311,15 +313,15 @@ def train_once(n0, n1, i, activation, init='fixed'):
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
-    activation = 'linear' # ''sigmoid'
-    n0 = DQN(output_activation=activation)
-    n1 = DQN(output_activation=activation)
+    activation = 'sigmoid' # linear, sigmoid
+    n0 = ValueNetwork(output_activation=activation)
+    n1 = ValueNetwork(output_activation=activation)
     n1.copy(n0)
     episode = 10000000
     for i in range(episode+1):
         train_once(n0, n1, i, activation, init='random')
         if i % 10000 == 0:
-            n0.save_model('model/qlearning_network/DQN_%s_%05dw.model' % (activation, i // 10000))
+            n0.save_model('model/value_network/value_network_%s_%05dw.model' % (activation, i // 10000))
     # for i in range(episode+1, episode*2 + 1, 1):
     #     train_once(n0, n1, i, init='fixed')
     #     if i % 1000 == 0:

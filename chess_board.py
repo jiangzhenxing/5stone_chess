@@ -153,7 +153,13 @@ class ChessBoard:
             if not messagebox.askokcancel(title='请确认', message='确定取消当前棋局并重新开局？'):
                 return
         self.clear()
-        self.init_stone()
+        bd = [[0, 0, 0, 0, 0],
+              [0, 1,-1, 0, 0],
+              [0, 0, 1, 0, 0],
+              [0,-1, 0, 0, 0],
+              [0, 0, 0, 0, 0],]
+        # bd = -np.array(bd)
+        self.init_stone(bd)
         init_board = self.board()
         first_player = self.first_player.get()
         player_name = self.player_var.get()
@@ -217,6 +223,8 @@ class ChessBoard:
             board = np.zeros((5,5))
             board[0,:] = -1
             board[4,:] = 1
+        else:
+            board = np.array(board)
         for i,j in np.argwhere(board == WHITE_VALUE):
             self.create_stone(i, j, WHITE_VALUE)
         for i, j in np.argwhere(board == BLACK_VALUE):

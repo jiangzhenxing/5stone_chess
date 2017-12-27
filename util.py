@@ -1,4 +1,5 @@
 import time
+import numpy as np
 import logging
 
 
@@ -27,3 +28,10 @@ def print_use_time(min_time=1):
 def add_print_time_fun(func):
     for f in func:
         print_time_func.add(f)
+
+
+def value_to_probs(values):
+    values = np.array(values)
+    x = np.log(values) - np.log(1.0001 - values)
+    y = np.e ** x
+    return y / y.sum()

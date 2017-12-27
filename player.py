@@ -208,7 +208,7 @@ class MCTSPlayer(ComputerPlayer):
         from mcts0 import MCTSWorker
         if first_player == -1:
             init_board = rule.flip_board(init_board)
-        ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, max_search=300, expansion_gate=10)
+        ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, max_search=500, expansion_gate=10)
         if first_player != self.stone_val:
             # 对手走棋时，开始搜索
             ts_worker.begin_search()
