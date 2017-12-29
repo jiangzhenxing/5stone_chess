@@ -8,6 +8,8 @@ from util import add_print_time_fun, print_use_time
 from record import Record
 import logging
 
+import keras.activations as a
+
 logger = logging.getLogger('train')
 
 
@@ -89,11 +91,19 @@ class DQN:
                             bias_initializer='zeros',
                             bias_regularizer=l2(l)
                             ))
+        elif self.output_activation == 'selu':
+            model.add(Dense(units=1,
+                            activation='selu',
+                            kernel_initializer='zeros',
+                            kernel_regularizer=l2(l),
+                            bias_initializer='zeros',
+                            bias_regularizer=l2(l)
+                            ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
         opt = SGD(lr=1e-3)
         # loss function
-        loss = 'mse' if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
+        loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
         return model
 
@@ -267,7 +277,9 @@ def simulate(nw0, nw1, activation, init='fixed'):
             if activation == 'sigmoid':
                 records.add3(bd, from_, action, reward, win=command==rule.WIN)
             elif activation == 'linear':
-                records.add1(bd, from_, action, reward, win=command==rule.WIN)
+                records.add4(bd, from_, action, reward, win=command==rule.WIN)
+            elif activation == 'selu':
+                records.add4(bd, from_, action, reward, win=command==rule.WIN)
             else:
                 raise ValueError
         except NoActionException:
@@ -312,7 +324,7 @@ def train_once(n0, n1, i, activation, init='fixed'):
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
-    activation = 'linear' # ''sigmoid'
+    activation = 'selu' # 'linear' # ''sigmoid'
     n0 = DQN(output_activation=activation)
     n1 = DQN(output_activation=activation)
     n1.copy(n0)

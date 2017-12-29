@@ -9,6 +9,7 @@ from tkinter import filedialog
 from tkinter import ttk
 from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer,MCTSPlayer
 from record import Record
+from init_boards import init_board
 import logging
 
 logger = logging.getLogger('app')
@@ -153,14 +154,8 @@ class ChessBoard:
             if not messagebox.askokcancel(title='请确认', message='确定取消当前棋局并重新开局？'):
                 return
         self.clear()
-        bd = [[0, 0, 0, 0, 0],
-              [0, 1,-1, 0, 0],
-              [0, 0, 1, 0, 0],
-              [0,-1, 0, 0, 0],
-              [0, 0, 0, 0, 0],]
         # bd = -np.array(bd)
         self.init_stone()
-        init_board = self.board()
         first_player = self.first_player.get()
         player_name = self.player_var.get()
         player_class, p, kp = self.player_map[player_name]
@@ -218,13 +213,8 @@ class ChessBoard:
                 self.game_over(stone.player)
         self.play_timer = self.window.after(int(self.period * 1000), play_later)
 
-    def init_stone(self, board=None):
-        if board is None:
-            board = np.zeros((5,5))
-            board[0,:] = -1
-            board[4,:] = 1
-        else:
-            board = np.array(board)
+    def init_stone(self, board=init_board):
+        board = np.array(board)
         for i,j in np.argwhere(board == WHITE_VALUE):
             self.create_stone(i, j, WHITE_VALUE)
         for i, j in np.argwhere(board == BLACK_VALUE):
@@ -317,8 +307,8 @@ class ChessBoard:
         self.event.set()
         record = Record()
         record.read(recordpath)
-        init_board = record[0][0]
-        self.init_stone(init_board)
+        init_bd = record[0][0]
+        self.init_stone(init_bd)
         record_iter = iter(record)
         length = len(record)
         record.n = 1

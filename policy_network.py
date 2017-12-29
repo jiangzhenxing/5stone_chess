@@ -524,11 +524,11 @@ def train_cpn():
     for i in range(0, episode+1,1):
         train(n0, n1, i, init='random')
         if i % 1000 == 0:
-            n0.save_model('model/convolution_policy_network_%04d.model' % (i // 100))
+            n0.save_model('model/policy_network/convolution_%04dk.model' % (i // 1000))
     for i in range(episode+1, episode*2 + 1, 1):
         train(n0, n1, i, init='fixed')
         if i % 1000 == 0:
-            n0.save_model('model/convolution_policy_network_%04d.model' % (i // 100))
+            n0.save_model('model/policy_network/convolution_%04dk.model' % (i // 1000))
 
 
 if __name__ == '__main__':

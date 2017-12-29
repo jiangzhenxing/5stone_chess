@@ -292,8 +292,6 @@ def simulate(nw0, nw1, activation, init='fixed'):
             logging.info('走子数过多: %s', records.length())
             return Record(),0
         player = -player
-        # if init == 'random':
-        #     board = rule.flip_board(board)
 
 @print_use_time()
 def train_once(n0, n1, i, activation, init='fixed'):
