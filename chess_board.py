@@ -9,7 +9,7 @@ from tkinter import filedialog
 from tkinter import ttk
 from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer,MCTSPlayer
 from record import Record
-from init_boards import init_board
+from init_boards import init_boards
 import logging
 
 logger = logging.getLogger('app')
@@ -72,30 +72,43 @@ class ChessBoard:
 
         # ----------------- 第一排按扭 -----------------------------------------
         # 对手选择
-        tk.Label(window, text='请选择对手:').place(x=10, y=620)
+        tk.Label(window, text='对手:').place(x=10, y=620)
         player_var = tk.StringVar()
         player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
+                          ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
                           ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_sigmoid_00169.model'}),
                           ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/qlearning_network/DQN_sigmoid_00169.model', 'worker_model':'model/qlearning_network/DQN_sigmoid_00169.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
-        player_choosen = ttk.Combobox(window, width=18, textvariable=player_var, values=players, state='readonly')
+        player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
         player_choosen.current(0)
-        player_choosen.place(x=90, y=617)
+        player_choosen.place(x=50, y=617)
         self.player_var = player_var
+        self.player_choosen = player_choosen
+
+        # 开局选择
+        tk.Label(window, text='开局:').place(x=228, y=620)
+        board_var = tk.IntVar(0)
+        boards = list(range(len(init_boards)))
+        board_choosen = ttk.Combobox(window, width=2, textvariable=board_var, values=boards, state='readonly')
+        board_choosen.current(0)
+        board_choosen.place(x=270, y=617)
+        self.board_var = board_var
+        self.board_choosen = board_choosen
+        board_choosen.bind('<<ComboboxSelected>>', self.board_selected)
 
         # 先手
-        first_player = tk.IntVar(value=BLACK_VALUE)
-        tk.Radiobutton(window, text='黑先', variable=first_player, value=BLACK_VALUE).place(x=290, y=620)
-        tk.Radiobutton(window, text='白先', variable=first_player, value=WHITE_VALUE).place(x=345, y=620)
+        first_player = tk.IntVar(value=WHITE_VALUE)
+        tk.Radiobutton(window, text='黑先', variable=first_player, value=BLACK_VALUE).place(x=325, y=620)
+        tk.Radiobutton(window, text='白先', variable=first_player, value=WHITE_VALUE).place(x=380, y=620)
         self.first_player = first_player
 
         # 开始按扭
         start_btn_text = tk.StringVar(window, value='start')
-        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=415, y=617)
+        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=445, y=617)
 
         # 帮助按扭
-        tk.Button(window, text='help', command=None).place(x=510, y=617)
+        tk.Button(window, text='help', command=None).place(x=530, y=617)
 
         # ---------------- 第二排按扭 ------------------------------------------
         # 选择棋谱
@@ -139,6 +152,7 @@ class ChessBoard:
         self.play_timer = None
         self.replay_timer = None
         self.winner = None
+        self.started = False
         self.ended = False
         self.action_select_signal = None
         self.start_btn_text = start_btn_text
@@ -147,15 +161,16 @@ class ChessBoard:
         self.event = threading.Event()
         self.record = Record()    # 记录棋谱: board:from_:to_:del_num
         self.stones = []
-        self.init_stone()
+        init_board = init_boards[self.board_var.get()]
+        self.init_stone(init_board)
 
     def start(self):
-        if self.start_btn_text.get() == 'restart':
-            if not messagebox.askokcancel(title='请确认', message='确定取消当前棋局并重新开局？'):
-                return
-        self.clear()
-        # bd = -np.array(bd)
-        self.init_stone()
+        if self.start_btn_text.get() == 'stop':
+            if messagebox.askokcancel(title='请确认', message='确定停止当前棋局?'):
+                self.stop()
+            return
+        init_board = init_boards[self.board_var.get()]
+        self.init_stone(init_board)
         first_player = self.first_player.get()
         player_name = self.player_var.get()
         player_class, p, kp = self.player_map[player_name]
@@ -176,14 +191,28 @@ class ChessBoard:
         self.show_signal()
         self.begin_timer()
         self.canvas.bind('<Button-1>', self.onclick)
-        self.start_btn_text.set('restart')
+        self.start_btn_text.set('stop')
         self.white_player.start(init_board=init_board, first_player=first_player)
         self.black_player.start(init_board=init_board, first_player=first_player)
+        self.started = True
         self.play()
+
+    def board_selected(self, _):
+        self.board_choosen.selection_clear()
+        if not self.started:
+            init_board = init_boards[self.board_var.get()]
+            self.init_stone(init_board)
 
     def play(self):
         logger.info('%s play...', self.current_player)
         if self.current_player.is_humman():
+            # 对手预测走棋
+            bd = self.board()
+            pl = self.current_player.stone_val
+            op = self.opponent().predict_opponent(bd)
+            if op is not None:
+                valid = rule.valid_action(bd, pl)
+                self.show_qtext(op, valid, hide=False)
             return
         board = self.board()
         self.current_player.play(board)
@@ -199,13 +228,6 @@ class ChessBoard:
         def play_later():
             result = self.move_to(stone, to_)
             if result == rule.ACCQUIRE:
-                # 预测对手走棋
-                bd = self.board()
-                pl = -player
-                op = self.current_player.predict_opponent(bd)
-                if op is not None:
-                    valid = rule.valid_action(bd, pl)
-                    self.show_qtext(op, valid, hide=False)
                 # 对手走棋
                 self.switch_player_and_play()
             elif result == rule.WIN:
@@ -213,7 +235,10 @@ class ChessBoard:
                 self.game_over(stone.player)
         self.play_timer = self.window.after(int(self.period * 1000), play_later)
 
-    def init_stone(self, board=init_board):
+    def init_stone(self, board=None):
+        self.clear()
+        if board is None:
+            board = init_boards[0]
         board = np.array(board)
         for i,j in np.argwhere(board == WHITE_VALUE):
             self.create_stone(i, j, WHITE_VALUE)
@@ -303,7 +328,7 @@ class ChessBoard:
         if not recordpath:
             self.show_message(message='请点击"open"按扭选择棋谱位置')
             return
-        self.clear()
+        self.stop()
         self.event.set()
         record = Record()
         record.read(recordpath)
@@ -395,39 +420,48 @@ class ChessBoard:
         if -1 < i < 5 and -1 < j < 5:
             return i,j
 
-    def clear(self):
+    def clear_stone(self):
         for s in self.stones:
             self.del_stone(s)
         self.stones.clear()
+
+    def stop(self):
         if self.timer:
             self.cancel_timer()
         if self.play_timer:
             self.window.after_cancel(self.play_timer)
         if self.replay_timer:
             self.replay_timer.cancel()
-        self.hide_signal()
-        self.hide_winner()
-        self.hide_qtext()
-        self.hide_select()
         self.start_btn_text.set('start')
         self.pause_text.set('pause')
-        self.show_message('')
         if self.black_player:
             self.black_player.stop()
             self.black_player = None
         if self.white_player:
             self.white_player.stop()
             self.white_player = None
+        self.started = False
+        self.ended = True
+
+    def clear(self):
+        self.clear_stone()
+        self.clear_timer()
+        self.hide_signal()
+        self.hide_winner()
+        self.hide_qtext()
+        self.hide_select()
+        self.show_message('')
         self.current_player = None
         self.current_stone = None
         self.timer = None
         self.winner = None
-        self.ended = False
         self.record.clear()
+        self.ended = False
 
     def game_over(self, winner):
         # self.lb.config(text='winner is: ' + str(winner))
         self.winner = winner
+        self.started = False
         self.ended = True
         self.canvas.unbind('<Button-1>')
         self.cancel_timer()
@@ -443,6 +477,7 @@ class ChessBoard:
         return np.array([[0 if s is None else s.value for s in row] for row in self._board])
 
     def begin_timer(self):
+        self.canvas.itemconfigure(self.current_player.clock, text='00:00')
         self.current_player.begin_time = int(time.time())
         def timer(player):
             use_time = int(time.time()) - player.begin_time
@@ -453,7 +488,10 @@ class ChessBoard:
 
     def cancel_timer(self):
         self.canvas.after_cancel(self.timer)
-        self.canvas.itemconfigure(self.current_player.clock, text='00:00')
+
+    def clear_timer(self):
+        self.canvas.itemconfigure(self.clock_white, text='00:00')
+        self.canvas.itemconfigure(self.clock_black, text='00:00')
 
     def change_period(self, scale):
         self.period *= scale

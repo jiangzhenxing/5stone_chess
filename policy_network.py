@@ -85,6 +85,7 @@ class PolicyNetwork:
                 row, col, action = mx_index[np.random.randint(len(mx_index))]  # 从最大概率的动作中随机选择
                 if check and (board_str,player,((row, col), action)) in self.predicts:
                     # 如果此步已经走过了，将其概率置为0，重新选择
+                    logger.info('%s has gone', (row,col,action))
                     vp[row,col,action] = 0
                 else:
                     self.predicts.add((board_str,player,((row, col), action)))

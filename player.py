@@ -22,6 +22,7 @@ class Player:
         self.type_ = type_
         self.begin_time = 0
         self.total_time = 0
+        self.stopped = False
 
     def play(self, board):
         """
@@ -93,7 +94,7 @@ class PolicyNetworkPlayer(ComputerPlayer):
     def play(self, board):
         logger.info('%s play...', self.name)
         board_self = rule.flip_board(board) if self.stone_val == -1 else board.copy()
-        from_, action, vp, p = self.model.predict(board_self, self.stone_val)
+        from_, action, vp, p = self.model.policy(board_self, self.stone_val)
         to_ = tuple(np.add(from_, rule.actions_move[action]))
         if self.stone_val == -1:
             from_ = rule.flip_location(from_)
@@ -173,9 +174,13 @@ class MCTSPlayer(ComputerPlayer):
             board_self = board.copy()
         self.player_end.send((board_self, self.stone_val, None))
         def wait_result_to_play():
-            (from_, action), q = self.player_end.recv()
-            logger.info('resv: from:%s, action:%s', from_, action)
-            to_ = tuple(np.add(from_, rule.actions_move[action]))
+            action, q = self.player_end.recv()
+            logger.info('resv: action:%s', action)
+            if action is None:
+                logger.info('wait_result_to_play thread stop...')
+                return
+            from_,act = action
+            to_ = tuple(np.add(from_, rule.actions_move[act]))
             q_table = np.zeros((5, 5, 4))
             for (f, a), q_ in q:
                 q_table[f][a] = q_
@@ -208,7 +213,9 @@ class MCTSPlayer(ComputerPlayer):
         from mcts0 import MCTSWorker
         if first_player == -1:
             init_board = rule.flip_board(init_board)
-        ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, max_search=500, expansion_gate=10)
+        def predict_callback(a, q):
+            self.mcts_end.send((a, q))
+        ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, predict_callback, max_search=500, expansion_gate=10)
         if first_player != self.stone_val:
             # 对手走棋时，开始搜索
             ts_worker.begin_search()
@@ -220,10 +227,7 @@ class MCTSPlayer(ComputerPlayer):
                 break
             if action is None:
                 # 走棋
-                a,q = ts_worker.predict(board, player)
-                self.mcts_end.send((a,q))
-                # 对手走棋时继续搜索
-                ts_worker.begin_search()
+                ts_worker.predict(board, player)
             else:
                 # 对手走棋，向下移动树
                 logger.info('对手走棋:%s stop search', action)
@@ -234,3 +238,4 @@ class MCTSPlayer(ComputerPlayer):
 
     def stop(self):
         self.player_end.send((None, None, None))
+        self.stopped = True

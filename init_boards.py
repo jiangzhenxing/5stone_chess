@@ -21,4 +21,4 @@ init_boards = [[[-1,-1,-1,-1,-1],
                 [ 0, 0, 0, 0, 0]],
               ]
 
-init_board = np.array(init_boards[0])
+init_board = np.array(init_boards[1])

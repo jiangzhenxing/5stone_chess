@@ -269,9 +269,11 @@ class COMMAND:
 
 
 class MCTSWorker:
-    def __init__(self, board, first_player, policy_model, worker_model, max_search=1000, expansion_gate=50):
+    def __init__(self, board, first_player, policy_model, worker_model, predict_callback, max_search=1000, expansion_gate=50):
+        self.predict_callback = predict_callback
         self.command_queue = Queue()
-        self.result_queue = Queue()
+        # self.result_queue = Queue()
+        self.stopped = False
         self.ts =  MCTS(board, first_player, policy_model, worker_model, max_search=max_search, expansion_gate=expansion_gate)
         self.ts.show_info()
         Thread(target=self.start).start()
@@ -279,14 +281,19 @@ class MCTSWorker:
     def start(self):
         while True:
             command, board, player, action = self.command_queue.get()
-            logger.info('\nget: %s\n%s\n player:%s action:%s', command, board, player, action)
+            logger.info('\nget: %s, command==COMMAND.STOP:%s\n%s\n player:%s action:%s', command, command == COMMAND.STOP, board, player, action)
             if command == COMMAND.STOP:
+                logger.info('MCTS WORKER ENDING...')
                 break
             if command == COMMAND.PREDICT:
                 # 走棋
                 a, q = self.ts.predict(board, player)
-                self.result_queue.put((a, q))
-                self.ts.move_down(self.ts.root.board, self.ts.root.player, a)
+                if self.stopped:
+                    self.predict_callback(None, None)
+                else:
+                    self.predict_callback(a,q)
+                    self.ts.move_down(self.ts.root.board, self.ts.root.player, a)
+                    self.ts.search(max_search=2 ** 32, max_search_time=2 ** 32)
             elif command == COMMAND.MOVE_DOWN:
                 # 对手走棋，向下移动树
                 logger.info('move down...')
@@ -300,7 +307,6 @@ class MCTSWorker:
 
     def predict(self, board, player):
         self.send(COMMAND.PREDICT, board, player)
-        return self.result_queue.get()
 
     def begin_search(self):
         self.send(COMMAND.SEARCH)
@@ -312,7 +318,9 @@ class MCTSWorker:
         self.send(COMMAND.MOVE_DOWN, self.ts.root.board, self.ts.root.player, action)
 
     def stop(self):
+        self.stopped = True
         self.send(COMMAND.STOP)
+        self.stop_search()
 
 
 def main():
