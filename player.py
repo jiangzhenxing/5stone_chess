@@ -4,6 +4,8 @@ from multiprocessing import Process,Pipe
 from threading import Thread
 from policy_network import PolicyNetwork
 from qlearning_network import DQN
+from value_network import ValueNetwork
+from mcts0 import MCTSProcess
 import chess_rule as rule
 
 
@@ -13,12 +15,14 @@ HUMMAN = 'HUMMAN'
 COMPUTER = 'COMPUTER'
 
 class Player:
-    def __init__(self, name, stone_val, signal, winner_text, clock, type_):
+    def __init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player, type_):
         self.name = name
         self.stone_val = stone_val
         self.signal = signal
         self.winner_text = winner_text
         self.clock = clock
+        self.init_board = init_board
+        self.first_player = first_player
         self.type_ = type_
         self.begin_time = 0
         self.total_time = 0
@@ -63,24 +67,22 @@ class Player:
 
 
 class HummaPlayer(Player):
-    def __init__(self, name, stone_val, signal, winner_text, clock):
-        Player.__init__(self, name, stone_val, signal, winner_text, clock, type_=HUMMAN)
+    def __init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player):
+        Player.__init__(self, name, stone_val, signal, winner_text, clock, init_board=init_board, first_player=first_player, type_=HUMMAN)
 
 
 class ComputerPlayer(Player):
-    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, modelfile):
-        Player.__init__(self, name, stone_val, signal, winner_text, clock, type_=COMPUTER)
+    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, modelfile, init_board, first_player):
+        Player.__init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player, type_=COMPUTER)
         self.play_func = play_func
         self.modelfile = modelfile
         self.model = self.load_model()
+
     def load_model(self):
         raise NotImplemented
 
 
 class PolicyNetworkPlayer(ComputerPlayer):
-    # def __init__(self, name, stone_val, signal, winner_text, clock, play_func, modelfile):
-    #     ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock, play_func,)
-    #     self.model = PolicyNetwork.load(modelfile)
     def load_model(self):
         return PolicyNetwork.load(self.modelfile)
 
@@ -113,9 +115,6 @@ class PolicyNetworkPlayer(ComputerPlayer):
 
 
 class DQNPlayer(ComputerPlayer):
-    # def __init__(self, name, stone_val, signal, winner_text, clock, modelfile):
-    #     ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock)
-    #     self.model = DQN.load(modelfile)
     def load_model(self):
         return DQN.load(self.modelfile)
 
@@ -155,14 +154,16 @@ class DQNPlayer(ComputerPlayer):
             q_table[f][a] = q1
         return q_table
 
+
+class ValuePlayer(DQNPlayer):
+    def load_model(self):
+        return ValueNetwork.load(self.modelfile)
+
+
 class MCTSPlayer(ComputerPlayer):
-    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, policy_model, worker_model):
-        ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock, play_func, None)
-        self.policy_model = policy_model
-        self.worker_model = worker_model
-        conn1, conn2 = Pipe()
-        self.player_end = conn1
-        self.mcts_end = conn2
+    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, policy_model, worker_model, init_board, first_player):
+        ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock, play_func, None, init_board, first_player)
+        self.mcts_process = MCTSProcess(policy_model, worker_model, init_board, first_player, stone_val)
 
     def load_model(self):
         return None
@@ -172,12 +173,11 @@ class MCTSPlayer(ComputerPlayer):
             board_self = rule.flip_board(board)
         else:
             board_self = board.copy()
-        self.player_end.send((board_self, self.stone_val, None))
-        def wait_result_to_play():
-            action, q = self.player_end.recv()
+        def _play():
+            action, q = self.mcts_process.predict(board_self, self.stone_val)
             logger.info('resv: action:%s', action)
             if action is None:
-                logger.info('wait_result_to_play thread stop...')
+                logger.info('_play thread stop...')
                 return
             from_,act = action
             to_ = tuple(np.add(from_, rule.actions_move[act]))
@@ -189,12 +189,9 @@ class MCTSPlayer(ComputerPlayer):
                 to_ = rule.flip_location(to_)
                 q_table = rule.flip_action_probs(q_table)
             self.play_func(board, self.stone_val, from_, to_, q_table)
-        Thread(target=wait_result_to_play).start()
+        Thread(target=_play).start()
 
     def opponent_play(self, board, from_, to_):
-        if board is None:
-            self.player_end.send((None, None, None))
-            return
         player = board[from_]
         assert player == -self.stone_val, str(board) + '\nfrom:' + str(from_) + ' to:' + str(to_)
         act = tuple(np.subtract(to_, from_))
@@ -203,39 +200,41 @@ class MCTSPlayer(ComputerPlayer):
         if player == -1:
             board = rule.flip_board(board)
             action = rule.flip_action(action)
-        self.player_end.send((board, player, action))
+        self.mcts_process.opponent_play(board, player, action)
 
     def start(self, init_board, first_player):
-        Process(target=self._start, args=(init_board, first_player)).start()
+        self.mcts_process.start()
+        self.stopped = False
 
-    def _start(self, init_board, first_player):
-        logger.info('start...')
-        from mcts0 import MCTSWorker
-        if first_player == -1:
-            init_board = rule.flip_board(init_board)
-        def predict_callback(a, q):
-            self.mcts_end.send((a, q))
-        ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, predict_callback, max_search=500, expansion_gate=10)
-        if first_player != self.stone_val:
-            # 对手走棋时，开始搜索
-            ts_worker.begin_search()
-        while True:
-            board, player, action = self.mcts_end.recv()
-            logger.info('\nrecv: \n%s\n player:%s action:%s', board, player, action)
-            if board is None:
-                ts_worker.stop()
-                break
-            if action is None:
-                # 走棋
-                ts_worker.predict(board, player)
-            else:
-                # 对手走棋，向下移动树
-                logger.info('对手走棋:%s stop search', action)
-                ts_worker.stop_search()
-                logger.info('move down along %s', action)
-                ts_worker.move_down(action)
-        logger.info('...MCTS PROCESS ENDED...')
+    # def _start(self, init_board, first_player):
+    #     logger.info('start...')
+    #     from mcts0 import MCTSWorker
+    #     if first_player == -1:
+    #         init_board = rule.flip_board(init_board)
+    #     def predict_callback(a, q):
+    #         self.mcts_end.send((a, q))
+    #     ts_worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, predict_callback, max_search=500, expansion_gate=10)
+    #     ts_worker.start()
+    #     if first_player != self.stone_val:
+    #         # 对手走棋时，开始搜索
+    #         ts_worker.begin_search()
+    #     while True:
+    #         board, player, action = self.mcts_end.recv()
+    #         logger.info('\nrecv: \n%s\n player:%s action:%s', board, player, action)
+    #         if board is None:
+    #             ts_worker.stop()
+    #             break
+    #         if action is None:
+    #             # 走棋
+    #             ts_worker.predict(board, player)
+    #         else:
+    #             # 对手走棋，向下移动树
+    #             logger.info('对手走棋:%s stop search', action)
+    #             ts_worker.stop_search()
+    #             logger.info('move down along %s', action)
+    #             ts_worker.move_down(action)
+    #     logger.info('...MCTS PROCESS ENDED...')
 
     def stop(self):
-        self.player_end.send((None, None, None))
+        self.mcts_process.stop()
         self.stopped = True

@@ -1,9 +1,11 @@
 import numpy as np
 import time
 from threading import Thread,Event
+from multiprocessing import Process,Pipe
 from queue import Queue
 from policy_network import PolicyNetwork
 from qlearning_network import DQN
+from value_network import ValueNetwork
 import chess_rule as rule
 import logging
 
@@ -160,8 +162,9 @@ class MCTS:
         self.depth = 0
         self.n_node = 0
         self.n_search = 0
-        self.policy = DQN.load(policy_model)
-        self.worker = DQN.load(worker_model)
+        network = ValueNetwork.load(worker_model)
+        self.policy = network
+        self.worker = network
         self.root = Node(board, player, tree=self)
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
         self.root.expansion(set())
@@ -188,6 +191,7 @@ class MCTS:
     def stop_search(self):
         if not self.searching:
             return
+        self.stop_event.clear()
         self.stop = True
         # 等待搜索结束
         self.stop_event.wait()
@@ -196,8 +200,7 @@ class MCTS:
         logger.info('search stopped...')
 
     def predict(self, board, player):
-        self.root = Node(board, player, tree=self)
-        self.root.expansion(set())
+        assert (self.root.board == board).all() and self.root.player == player, '%s,player:%s\nroot:\n%s,player:%s' % (board, player, self.root.board, self.root.player)
         self.search()
         e = self.root.predict()
         action = e.a
@@ -253,7 +256,7 @@ class MCTS:
     def show_info(self):
         info = '\n------------- tree info --------------\n' \
                'depth:%s, n_node:%s\n' \
-               'root is:\n%s'
+               'root: \n%s'
         logger_tree.info(info, self.depth, self.n_node, self.root)
         for e in self.root.sub_edge:
             logger_tree.info('edge:%s, v:%s, p:%s, N:%s, q:%s', e.a, e.v, e.p, e.n, e.q())
@@ -276,9 +279,11 @@ class MCTSWorker:
         self.stopped = False
         self.ts =  MCTS(board, first_player, policy_model, worker_model, max_search=max_search, expansion_gate=expansion_gate)
         self.ts.show_info()
-        Thread(target=self.start).start()
 
     def start(self):
+        Thread(target=self._start).start()
+
+    def _start(self):
         while True:
             command, board, player, action = self.command_queue.get()
             logger.info('\nget: %s, command==COMMAND.STOP:%s\n%s\n player:%s action:%s', command, command == COMMAND.STOP, board, player, action)
@@ -321,6 +326,70 @@ class MCTSWorker:
         self.stopped = True
         self.send(COMMAND.STOP)
         self.stop_search()
+
+
+class MCTSProcess:
+    """
+    MCTS进程
+    该进程是非阻塞的，只是发送命令和接收结果
+    具体搜索任务由另一个线程MCTSWorker完成
+    """
+    def __init__(self, policy_model, worker_model, init_board, first_player, player_val):
+        self.policy_model = policy_model
+        self.worker_model = worker_model
+        self.player_val = player_val
+        conn1, conn2 = Pipe()
+        self.player_end = conn1
+        self.mcts_end = conn2
+        if first_player == -1:
+            init_board = rule.flip_board(init_board)
+        self.worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, self.predict_callback, max_search=500, expansion_gate=10)
+        self.stopped = False
+
+    def start(self):
+        Process(target=self._start).start()
+        self.stopped = False
+
+    def predict_callback(self, a, q):
+        self.mcts_end.send((a, q))
+
+    def _start(self):
+        logger.info('start...')
+
+        self.worker.start()
+        while True:
+            board, player, action = self.mcts_end.recv()
+            logger.info('\nrecv: \n%s\n player:%s action:%s', board, player, action)
+            if board is None:
+                self.worker.stop()
+                break
+            elif action is None:
+                # 走棋
+                self.worker.predict(board, player)
+            elif action is not None:
+                # 对手走棋，先停止搜索，然后沿对手走棋的方向向下移动树
+                logger.info('对手走棋:%s stop search', action)
+                self.worker.stop_search()
+                logger.info('move down along %s', action)
+                self.worker.move_down(action)
+        logger.info('...MCTS PROCESS ENDED...')
+
+    def begin_search(self):
+        self.worker.begin_search()
+
+    def predict(self, board, player):
+        self.player_end.send((board, player, None))
+        return self.player_end.recv()   # action, q
+
+    def opponent_play(self, board, player, action):
+        """
+        对手走完棋:action,搜索树需要沿对手走棋的方向移动树的根结点
+        """
+        self.player_end.send((board, player, action))
+
+    def stop(self):
+        self.player_end.send((None, None, None))
+        self.stopped = True
 
 
 def main():

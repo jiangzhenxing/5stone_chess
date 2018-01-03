@@ -1,14 +1,13 @@
 import numpy as np
-from keras.models import Sequential, load_model
+from keras.models import Sequential
 from keras.layers import Dense,Convolution2D,Flatten
 from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
 import chess_rule as rule
-from util import add_print_time_fun, print_use_time
+from util import add_print_time_fun, print_use_time, load_model
 from record import Record
 import logging
 
-import keras.activations as a
 
 logger = logging.getLogger('train')
 
@@ -281,7 +280,7 @@ def simulate(nw0, nw1, activation, init='fixed'):
             elif activation == 'selu':
                 records.add4(bd, from_, action, reward, win=command==rule.WIN)
             else:
-                raise ValueError
+                raise ValueError(activation)
         except NoActionException:
             # 随机初始化局面后一方无路可走
             return Record(),0
@@ -302,11 +301,16 @@ def simulate(nw0, nw1, activation, init='fixed'):
             logging.info('走子数过多: %s', records.length())
             return Record(),0
         player = -player
-        board = rule.flip_board(board)
+        if init == 'fixed':
+            board = rule.flip_board(board)
 
 @print_use_time()
 def train_once(n0, n1, i, activation, init='fixed'):
     logging.info('train: %d', i)
+    n0.episode = i
+    n1.episode = i
+    n0.decay_epsilon()
+    n1.decay_epsilon()
     records, winner = simulate(n0, n1, activation, init)
     if records.length() == 0:
         return
@@ -316,27 +320,23 @@ def train_once(n0, n1, i, activation, init='fixed'):
     n0.train(records, epochs=1)
     n0.clear()
     n1.clear()
-    n0.episode = i
-    n1.episode = i
-    n0.decay_epsilon()
-    n1.decay_epsilon()
 
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
-    activation = 'selu' # 'linear' # ''sigmoid'
-    n0 = DQN(output_activation=activation)
+    activation = 'sigmoid'     # linear, selu, sigmoid
+    n0 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_sigmoid_00387.model')
     n1 = DQN(output_activation=activation)
     n1.copy(n0)
     episode = 10000000
-    for i in range(episode+1):
-        train_once(n0, n1, i, activation, init='random')
-        if i % 10000 == 0:
-            n0.save_model('model/qlearning_network/DQN_%s_%05dw.model' % (activation, i // 10000))
-    # for i in range(episode+1, episode*2 + 1, 1):
-    #     train_once(n0, n1, i, init='fixed')
-    #     if i % 1000 == 0:
-    #         n0.save_model('model/DQN_%04d.model' % (i // 100))
+    # for i in range(episode+1):
+    #     train_once(n0, n1, i, activation, init='random')
+    #     if i % 10000 == 0:
+    #         n0.save_model('model/qlearning_network/DQN_%s_%05dw.model' % (activation, i // 10000))
+    for i in range(0, episode + 1, 1):
+        train_once(n0, n1, i, activation, init='fixed')
+        if i % 1000 == 0:
+            n0.save_model('model/qlearning_network/DQN_fixed_%s_%05dw.model' % (activation, i // 10000))
 
 
 if __name__ == '__main__':

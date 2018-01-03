@@ -1,11 +1,11 @@
 import numpy as np
-from keras.models import Model, Sequential, load_model
+from keras.models import Model, Sequential
 from keras.layers import Input, Dense, Convolution2D, Activation, Flatten
 from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
 from keras.layers.merge import add
 import chess_rule as rule
-from util import add_print_time_fun, print_use_time
+from util import add_print_time_fun, print_use_time, load_model
 from record import Record
 import logging
 
@@ -252,13 +252,11 @@ class ValueNetwork:
 # @print_use_time()
 def simulate(nw0, nw1, activation, init='fixed'):
     board = rule.init_board() if init=='fixed' else rule.random_init_board()
-    player = 1 if np.random.random() > 0.5 else -1
+    player = 1
     records = Record()
     while True:
         nw = nw0 if player == 1 else nw1
         try:
-            if init == 'fixed' and player == -1:
-                board = rule.flip_board(board)
             bd = board.copy()
             from_, action = nw.policy(board, player)
             assert board[from_] == player
@@ -292,6 +290,8 @@ def simulate(nw0, nw1, activation, init='fixed'):
             logging.info('走子数过多: %s', records.length())
             return Record(),0
         player = -player
+        if init == 'fixed':
+            board = rule.flip_board(board)
 
 @print_use_time()
 def train_once(n0, n1, i, activation, init='fixed'):

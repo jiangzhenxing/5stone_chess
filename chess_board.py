@@ -3,11 +3,8 @@ import numpy as np
 import time
 import threading
 import chess_rule as rule
-from tkinter import font
-from tkinter import messagebox
-from tkinter import filedialog
-from tkinter import ttk
-from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer,MCTSPlayer
+from tkinter import font,messagebox,filedialog,ttk
+from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer, ValuePlayer, MCTSPlayer
 from record import Record
 from init_boards import init_boards
 import logging
@@ -76,8 +73,9 @@ class ChessBoard:
         player_var = tk.StringVar()
         player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
                           ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
-                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_sigmoid_00169.model'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/qlearning_network/DQN_sigmoid_00169.model', 'worker_model':'model/qlearning_network/DQN_sigmoid_00169.model'}),]
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_selu_00149w.model'}),
+                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_sigmoid_00074w.model'}),
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/value_network/value_network_sigmoid_00074w.model', 'worker_model':'model/value_network/value_network_sigmoid_00074w.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
@@ -108,7 +106,7 @@ class ChessBoard:
         tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=445, y=617)
 
         # 帮助按扭
-        tk.Button(window, text='help', command=None).place(x=530, y=617)
+        tk.Button(window, text='help', command=self.help).place(x=530, y=617)
 
         # ---------------- 第二排按扭 ------------------------------------------
         # 选择棋谱
@@ -174,11 +172,11 @@ class ChessBoard:
         first_player = self.first_player.get()
         player_name = self.player_var.get()
         player_class, p, kp = self.player_map[player_name]
-        white_player = player_class(*p, **kp)
+        white_player = player_class(*p, init_board=init_board, first_player=first_player, **kp)
         # white_player = PolicyNetworkPlayer('Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/policy_network/convolution_6000.model')
         # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/qlearning_network/DQN_dr_3000.model')
         # white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/DQN_0090.model', )
-        black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black)
+        black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, init_board=init_board, first_player=first_player)
         self.players[WHITE_VALUE] = white_player
         self.players[BLACK_VALUE] = black_player
         for stone in self.stones:
@@ -300,7 +298,7 @@ class ChessBoard:
             self.switch_player_and_play()
         elif result == rule.WIN:
             logger.info('GAME OVER, WINNER IS %s', stone.player.name)
-            self.opponent().opponent_play(None, None, None)
+            self.opponent().stop()
             self.game_over(stone.player)
 
     def move_to(self, stone, to_loc):
@@ -506,8 +504,7 @@ class ChessBoard:
         logger.debug('select action is: %s', tuple(a))
         i, j = from_
         x, y = np.array([self.w * (j + 1), self.w * (i + 1)]) + np.array(a)[::-1] * 25
-        self.action_select_signal = self.create_oval(x, y, r=13, outline='#FFB90F',
-                                                     width=2)
+        self.action_select_signal = self.create_oval(x, y, r=13, outline='#FFB90F', width=2)
 
     def hide_select(self):
         """
@@ -564,6 +561,53 @@ class ChessBoard:
     def hide_winner(self):
         self.canvas.itemconfigure(self.winner_white, state=tk.HIDDEN)
         self.canvas.itemconfigure(self.winner_black, state=tk.HIDDEN)
+
+    def help(self):
+        window_help = tk.Toplevel(self.window)
+        window_help.geometry('400x560')
+        window_help.title('HELP')
+        tk.Label(window_help, text='1.规则', font=font.Font(size=16, weight='bold')).grid(row=0, sticky='w', padx=5)
+        tk.Label(window_help, text='1)走棋:一次只能上下左右移动一步', font=font.Font(size=14)).grid(row=1, sticky='w', padx=5)
+        tk.Label(window_help, text='2)吃子:', font=font.Font(size=14)).grid(row=2, sticky='w', padx=5)
+        canvas = tk.Canvas(window_help, width=200, height=100, bg='blue')
+        w = 50  # 棋格宽度
+        r = 20  # 棋子半径
+        # 棋盘
+        canvas.create_line(0, 50, 200, 50, width=2)
+        canvas.create_line(5, 0, 5, 100, width=2)
+        for i in range(1, 5):
+            canvas.create_line(i * w, 0, i * w, 100, width=2)
+        canvas.create_oval(50 - r, 50 - r, 50 + r, 50 + r, fill='#111', outline='#111')
+        canvas.create_oval(100 - r, 50 - r, 100 + r, 50 + r, fill='#111', outline='#111')
+        canvas.create_oval(150 - r, 50 - r, 150 + r, 50 + r, fill='#EEE', outline='#EEE')
+        d = 2 ** 0.5 * r // 2
+        canvas.create_line(150 - d, 50 - d, 150 + d, 50 + d, fill='red', width=2)
+        canvas.create_line(150 - d, 50 + d, 150 + d, 50 - d, fill='red', width=2)
+        canvas.grid(row=3, sticky='w', padx=20)
+        text = '  如上所示:\n' \
+               '  a.任意一个黑子走至当前位置后\n' \
+               '  b.形成在一条直线上有两个黑子对一个白子\n' \
+               '  c.且这三个棋子是连续的\n' \
+               '  d.且该直线上只有这三个棋子时\n' \
+               '  白子被吃掉(直线横坚均可)。\n' \
+               '  注意abcd四个条件缺一不可，白子走到当前位置不会被吃。'
+        tk.Label(window_help, text=text, anchor='w', justify='left', font=font.Font(size=14)).grid(row=5, sticky='w', padx=5)
+        tk.Label(window_help, text='3)赢棋:对方棋子少于两个或无路可走时赢棋', font=font.Font(size=14)).grid(row=6, sticky='w', padx=5)
+        tk.Label(window_help, text='2.使用', font=font.Font(size=16, weight='bold')).grid(row=7, sticky='w', padx=5)
+        tk.Label(window_help, text='1)开始:选择对手,先手后点击start按扭开始', font=font.Font(size=14)).grid(row=8, sticky='w', padx=5)
+        tk.Label(window_help, text='2)走棋:点击己方棋子，移动到目标位置后单击即可落子', font=font.Font(size=14)).grid(row=9, sticky='w', padx=5)
+        tk.Label(window_help, text='3)结束:点击stop按扭可结束棋局', font=font.Font(size=14)).grid(row=10, sticky='w', padx=5)
+        tk.Label(window_help, text='4)回放:点击replay按扭可以回放棋局，\n'
+                                   '  点击select按扭可选择棋谱，\n'
+                                   '  点击faster,slower按扭可调节回放速度，\n'
+                                   '  点击pause/resume按扭可暂停/继续回放',
+                 anchor='w', justify='left', font=font.Font(size=14)) \
+          .grid(row=11, sticky='w', padx=5)
+        tk.Label(window_help, text='5)可以根据需要选择不同的开局局面，\n'
+                                   '  局面可在init_boards.py中添加。',
+                 anchor='w', justify='left', font=font.Font(size=14)) \
+          .grid(row=12, sticky='w', padx=5)
+
 
     @staticmethod
     def launch():

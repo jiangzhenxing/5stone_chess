@@ -28,3 +28,14 @@ def print_use_time(min_time=1):
 def add_print_time_fun(func):
     for f in func:
         print_time_func.add(f)
+
+def load_model(filepath):
+    if filepath in models:
+        return models[filepath]
+    else:
+        from keras.models import load_model
+        model = load_model(filepath)
+        models[filepath] = model
+        return model
+
+models = {}
