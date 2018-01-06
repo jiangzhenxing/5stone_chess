@@ -7,6 +7,7 @@ from policy_network import PolicyNetwork
 from qlearning_network import DQN
 from value_network import ValueNetwork
 import chess_rule as rule
+import util
 import logging
 
 logger = logging.getLogger('train')
@@ -45,7 +46,7 @@ class Node:
             e = self.selection()
             value = e.v
             player = self.player
-            logger.info('level:%s, value:%s, player:%s', self.level, value, player)
+            logger.debug('level:%s, value:%s, player:%s', self.level, value, player)
         elif self.level > 1000:
             e = self.selection()
             value = e.v
@@ -83,7 +84,7 @@ class Node:
         if len(actions_) == 0:
             # 全部已经走过，重新选
             actions_ = actions
-        values = [self.tree.policy.q(board, from_, act) for from_,act in actions_]
+        values = [self.tree.value.q(board, from_, act) for from_,act in actions_]
         for action,value in zip(actions_, values):
             e = Edge(upper_node=self, a=action, v=value, p=0, lambda_=self.tree.lambda_)
             self.add_edge(e)
@@ -92,7 +93,7 @@ class Node:
         for p,e in zip(probs,self.sub_edge):
             e.p = p
         self.expanded = True
-        assert len(self.sub_edge) > 0, 'board:\n' + str(self.board) + '\nplayer:' + str(self.player)
+        # assert len(self.sub_edge) > 0, 'board:\n' + str(self.board) + '\nplayer:' + str(self.player)
 
     def add_edge(self, edge):
         self.sub_edge.append(edge)
@@ -151,7 +152,7 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, policy_model, worker_model, expansion_gate=50, lambda_=1.0, max_search=1000, max_search_time=600):
+    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, max_search=1000, max_search_time=600):
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
         self.max_search = max_search            # 最大的搜索次数
@@ -162,9 +163,10 @@ class MCTS:
         self.depth = 0
         self.n_node = 0
         self.n_search = 0
-        network = ValueNetwork.load(worker_model)
-        self.policy = network
-        self.worker = network
+        if isinstance(value_model, str):
+            value_model = DQN.load(value_model) if 'DQN' in value_model else ValueNetwork.load(value_model)
+        # self.policy = value_model
+        self.value = value_model
         self.root = Node(board, player, tree=self)
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
         self.root.expansion(set())
@@ -175,13 +177,13 @@ class MCTS:
         if max_search_time == 0: max_search_time = self.max_search_time
         start_time = time.time()
         while not self.stop and self.n_search < max_search and time.time()-start_time < max_search_time:
-            self.worker.predicts.update(self.predicted)
+            self.value.predicts.update(self.predicted)
             self.root.search(set())
             self.n_search += 1
-            self.worker.clear()
-            self.worker.episode += 1
-            logger.info('search %s', self.n_search)
-        logger.info('search over')
+            self.value.clear()
+            self.value.episode += 1
+            # logger.info('search %s', self.n_search)
+        logger.info('search over %s', self.n_search)
         self.n_search = 0
         self.show_info()
         self.searching = False
@@ -229,8 +231,8 @@ class MCTS:
         self.n_node = 1
         self.depth = 1
         self.update_tree_info(self.root)
-        logger.info('move down to node:%s', action)
-        self.show_info()
+        logger.debug('move down to node:%s', action)
+        # self.show_info()
 
     def update_tree_info(self, node):
         for e in node.sub_edge:
@@ -272,12 +274,12 @@ class COMMAND:
 
 
 class MCTSWorker:
-    def __init__(self, board, first_player, policy_model, worker_model, predict_callback, max_search=1000, expansion_gate=50):
+    def __init__(self, board, first_player, policy_model, value_model, predict_callback, max_search=1000, expansion_gate=50):
         self.predict_callback = predict_callback
         self.command_queue = Queue()
         # self.result_queue = Queue()
         self.stopped = False
-        self.ts =  MCTS(board, first_player, policy_model, worker_model, max_search=max_search, expansion_gate=expansion_gate)
+        self.ts =  MCTS(board, first_player, policy_model, value_model, max_search=max_search, expansion_gate=expansion_gate)
         self.ts.show_info()
 
     def start(self):
@@ -334,16 +336,16 @@ class MCTSProcess:
     该进程是非阻塞的，只是发送命令和接收结果
     具体搜索任务由另一个线程MCTSWorker完成
     """
-    def __init__(self, policy_model, worker_model, init_board, first_player, player_val):
+    def __init__(self, policy_model, value_model, init_board, first_player, player_val):
         self.policy_model = policy_model
-        self.worker_model = worker_model
+        self.value_model = value_model
         self.player_val = player_val
         conn1, conn2 = Pipe()
         self.player_end = conn1
         self.mcts_end = conn2
         if first_player == -1:
             init_board = rule.flip_board(init_board)
-        self.worker = MCTSWorker(init_board, first_player, self.policy_model, self.worker_model, self.predict_callback, max_search=500, expansion_gate=10)
+        self.worker = MCTSWorker(init_board, first_player, self.policy_model, self.value_model, self.predict_callback, max_search=500, expansion_gate=10)
         self.stopped = False
 
     def start(self):
@@ -392,6 +394,130 @@ class MCTSProcess:
         self.stopped = True
 
 
+class SimulateProcess:
+    def __init__(self, record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25):
+        self.record_queue = record_queue
+        self.model_queue = model_queue
+        self.weight_lock = weight_lock
+        self.weights_file = weights_file
+        self.epsilon = epsilon
+        self._epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.episode = 0
+        self.predicts = set()
+
+    def _start(self):
+        logger.info('start...')
+        value_model = ValueNetwork(output_activation='sigmoid')
+        for i in range(2 ** 32):
+            logger.info('simulate %s', i)
+            board = rule.random_init_board()
+            player = 1
+            # value_model_params = self.model_queue.get()
+            with self.weight_lock:
+                value_model.model.load_weights(self.weights_file)
+            ts = MCTS(board=board.copy(), player=player, policy_model=None, value_model=value_model, max_search=50)
+            records, winner = self.simulate(ts, board, player)
+            if records.length() == 0:
+                continue
+            self.record_queue.put(records)
+            if i % 1000 == 0:
+                records.save('records/train/alpha0/1st_')
+            self.episode = i
+            self.decay_epsilon()
+
+    def epsilon_greedy(self, board, player, valid_action, ts):
+        """
+        使用epsilon-greedy策略选择下一步动作
+        以epsilon以内的概率随机选择动作
+        以1-epsilon的概率选择最大Q值的动作
+        :return: 下一个动作: (from,to)
+        """
+        if np.random.random() > self.epsilon:
+            # 选取Q值最大的
+            action, q = ts.predict(board, player)
+            return action,q
+        else:
+            # 随机选择
+            return util.random_choice(valid_action), None
+
+    def simulate(self, ts, board, player):
+        from record import Record
+        from qlearning_network import NoActionException
+        records = Record()
+        while True:
+            try:
+                bd = board.copy()
+                board_str = util.board_str(board)
+                valid_action = rule.valid_actions(board, player)
+                while True:
+                    (from_, act), q = self.epsilon_greedy(board, player, valid_action, ts)
+                    if (board_str,from_, act) not in self.predicts:
+                        break
+                    ts.root.sub_edge = list(filter(lambda e: e.a != (from_,act), ts.root.sub_edge))
+                    valid_action.remove((from_,act))
+                assert board[from_] == player
+                ts.move_down(board, player, action=(from_, act))
+                if self.episode % 10 == 0:
+                    logger.info('action:%s,%s', from_, act)
+                    logger.info('q is %s', q)
+                to_ = tuple(np.add(from_, rule.actions_move[act]))
+                command, eat = rule.move(board, from_, to_)
+                records.add3(bd, from_, act, len(eat), win=command == rule.WIN)
+            except NoActionException:
+                # 随机初始化局面后一方无路可走
+                return Record(), 0
+            except Exception as ex:
+                logging.warning('board is:\n%s', board)
+                logging.warning('player is: %s', player)
+                valid = rule.valid_actions(board, player)
+                logging.warning('valid is:\n%s', valid)
+                logging.warning('from_:%s, act:%s', from_, act)
+                ts.show_info()
+                records.save('records/train/1st_')
+                raise ex
+            if command == rule.WIN:
+                logging.info('%s WIN, step use: %s, epsilon:%s', str(player), records.length(), self.epsilon)
+                return records, player
+            if records.length() > 10000:
+                logging.info('走子数过多: %s', records.length())
+                return Record(), 0
+            player = -player
+            board = rule.flip_board(board)
+
+    def decay_epsilon(self):
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
+
+    def start(self):
+        Process(target=self._start).start()
+
+
+def train():
+    from multiprocessing import Queue, Lock
+    record_queue = Queue()
+    model_queue = Queue()
+    weight_lock = Lock()
+    weights_file = 'model/alpha0/weights'
+    value_model = ValueNetwork(output_activation='sigmoid')
+    value_model.model.load_weights(weights_file)
+    for _ in range(3):
+        value_model.model.save_weights(weights_file)
+        model_queue.put(weights_file)
+        SimulateProcess(record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25).start()
+
+    for i in range(2 ** 32):
+        logger.info('.......... train %s ..............', i)
+        records = record_queue.get()
+        logger.info('records: %s', len(records))
+        value_model.train(records, epochs=5)
+        # model_queue.put(value_model)
+        with weight_lock:
+            value_model.model.save_weights(weights_file)
+            model_queue.put(weights_file)
+        if i % 100 == 0:
+            value_model.save_model('model/alpha0/value_network_%05dh.model' % (i // 100))
+
+
 def main():
     board = rule.init_board()
     player = 1
@@ -405,4 +531,4 @@ def main():
 if __name__ == '__main__':
     import logging.config
     logging.config.fileConfig('logging.conf')
-    main()
+    train()

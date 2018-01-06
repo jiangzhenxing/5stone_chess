@@ -29,6 +29,24 @@ def add_print_time_fun(func):
     for f in func:
         print_time_func.add(f)
 
+def random_choice(a):
+    """
+    从a中随机选择
+    """
+    return a[np.random.randint(len(a))]
+
+def board_str(board):
+    return ''.join(map(str, board.flatten()))
+
+def find_1st(L, func):
+    """
+    查找L中第一个符合条件func的元素
+    """
+    for e in L:
+        if func(e):
+            return e
+
+models = {}
 def load_model(filepath):
     if filepath in models:
         return models[filepath]
@@ -38,4 +56,3 @@ def load_model(filepath):
         models[filepath] = model
         return model
 
-models = {}

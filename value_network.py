@@ -37,20 +37,20 @@ class ValueNetwork:
     def create_model(self):
         def identity_block(x, nb_filter, kernel_size=3):
             k1, k2, k3 = nb_filter
-            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='relu')(x)
-            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='relu')(y)
+            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='selu')(x)
+            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='selu')(y)
             y = Convolution2D(filters=k3, kernel_size=1, strides=1)(y)
             y = add([x,y])
-            return Activation('relu')(y)
+            return Activation('selu')(y)
 
         def conv_block(x, nb_filter, kernel_size=3):
             k1, k2, k3 = nb_filter
-            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='relu')(x)
-            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='relu')(y)
+            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='selu')(x)
+            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='selu')(y)
             y = Convolution2D(filters=k3, kernel_size=1, strides=1)(y)
             x = Convolution2D(filters=k3, kernel_size=1, strides=1)(x)
             y = add([x,y])
-            return Activation('relu')(y)
+            return Activation('selu')(y)
 
         l = 1e-3
         # 输入层
@@ -63,7 +63,7 @@ class ValueNetwork:
             input_shape=(5,5,5),  # 输入平面的形状
             strides=1,          # 步长
             padding='same',     # padding方式 same:保持图大小不变/valid
-            activation='relu',  # 激活函数
+            activation='selu',  # 激活函数
         )(input_)
 
         out = identity_block(out, (100,100,100))

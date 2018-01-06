@@ -12,6 +12,7 @@ class Record:
     def __init__(self, gamma=0.9):
         self.gamma = gamma
         self.records = []
+        self.winner = None
 
     def add4(self, board, from_, action, reward, vp=None, win=False):
         """
@@ -22,6 +23,8 @@ class Record:
         self.records.append([board, from_, action, reward, vp])
         # player = board[from_]
         if win:
+            winner = board[from_]
+            self.winner = winner
             # 赢棋时计算每一步的总回报
             player_rewards = [0, 0, 0]
             for i,rc in enumerate(reversed(self.records)):
@@ -29,7 +32,6 @@ class Record:
                 player = int(b[f_])
                 rc[3] += player_rewards[player] * self.gamma
                 player_rewards[player] = rc[3]
-            winner = board[from_]
             for record in self.records:
                 b, f_, _,_,_ = record
                 record[3] += 1 if b[f_] == winner else -1
@@ -46,6 +48,8 @@ class Record:
             # 将对手上一步的回报-reward
             self.records[-2][3] -= reward
         if win:
+            winner = board[from_]
+            self.winner = winner
             # 赢棋时计算每一步的总回报
             player_rewards = [0, 0, 0]
             for i,rc in enumerate(reversed(self.records)):
@@ -70,6 +74,8 @@ class Record:
             # for i, r in enumerate(filter(lambda rc: rc[0][rc[1]]!=player, reversed(self.records[:-1]))):
             #     r[3] -= (reward * self.gamma ** i)
         if win:
+            winner = board[from_]
+            self.winner = winner
             # 赢棋时计算每一步的总回报
             player_rewards = [0, 0, 0]
             winner = board[from_]
@@ -100,6 +106,7 @@ class Record:
         self.records.append([board, from_, action, reward, vp])
         if win:
             winner = board[from_]
+            self.winner = winner
             for rc in self.records:
                 rc[3] = 1 if rc[0][rc[1]]==winner else -1
 
@@ -110,6 +117,7 @@ class Record:
         self.records.append([board, from_, action, reward, vp])
         if win:
             winner = board[from_]
+            self.winner = winner
             for rc in self.records:
                 rc[3] = 1 if rc[0][rc[1]]==winner else 0
 

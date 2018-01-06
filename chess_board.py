@@ -73,9 +73,9 @@ class ChessBoard:
         player_var = tk.StringVar()
         player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
                           ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
-                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_selu_00149w.model'}),
-                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_sigmoid_00074w.model'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/value_network/value_network_sigmoid_00074w.model', 'worker_model':'model/value_network/value_network_sigmoid_00074w.model'}),]
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_fixed_sigmoid_00007w.model'}),
+                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_sigmoid_00095w.model'}),
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/qlearning_network/DQN_fixed_sigmoid_00007w.model', 'worker_model':'model/qlearning_network/DQN_fixed_sigmoid_00007w.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
@@ -564,8 +564,7 @@ class ChessBoard:
 
     def help(self):
         window_help = tk.Toplevel(self.window)
-        window_help.geometry('400x560')
-        window_help.title('HELP')
+        window_help.geometry('400x600')
         tk.Label(window_help, text='1.规则', font=font.Font(size=16, weight='bold')).grid(row=0, sticky='w', padx=5)
         tk.Label(window_help, text='1)走棋:一次只能上下左右移动一步', font=font.Font(size=14)).grid(row=1, sticky='w', padx=5)
         tk.Label(window_help, text='2)吃子:', font=font.Font(size=14)).grid(row=2, sticky='w', padx=5)
@@ -593,20 +592,25 @@ class ChessBoard:
                '  注意abcd四个条件缺一不可，白子走到当前位置不会被吃。'
         tk.Label(window_help, text=text, anchor='w', justify='left', font=font.Font(size=14)).grid(row=5, sticky='w', padx=5)
         tk.Label(window_help, text='3)赢棋:对方棋子少于两个或无路可走时赢棋', font=font.Font(size=14)).grid(row=6, sticky='w', padx=5)
+
         tk.Label(window_help, text='2.使用', font=font.Font(size=16, weight='bold')).grid(row=7, sticky='w', padx=5)
-        tk.Label(window_help, text='1)开始:选择对手,先手后点击start按扭开始', font=font.Font(size=14)).grid(row=8, sticky='w', padx=5)
-        tk.Label(window_help, text='2)走棋:点击己方棋子，移动到目标位置后单击即可落子', font=font.Font(size=14)).grid(row=9, sticky='w', padx=5)
-        tk.Label(window_help, text='3)结束:点击stop按扭可结束棋局', font=font.Font(size=14)).grid(row=10, sticky='w', padx=5)
-        tk.Label(window_help, text='4)回放:点击replay按扭可以回放棋局，\n'
+        tk.Label(window_help, text='1)安装:建议安装anaconda，keras(使用Theano作backend)', font=font.Font(size=14)).grid(row=8, sticky='w', padx=5)
+        tk.Label(window_help, text='2)开始:选择对手,先手后点击start按扭开始', font=font.Font(size=14)).grid(row=9, sticky='w', padx=5)
+        tk.Label(window_help, text='3)走棋:点击己方棋子，移动到目标位置后单击即可落子', font=font.Font(size=14)).grid(row=10, sticky='w', padx=5)
+        tk.Label(window_help, text='4)结束:点击stop按扭可结束棋局', font=font.Font(size=14)).grid(row=11, sticky='w', padx=5)
+        tk.Label(window_help, text='5)回放:点击replay按扭可以回放棋局，\n'
                                    '  点击select按扭可选择棋谱，\n'
                                    '  点击faster,slower按扭可调节回放速度，\n'
                                    '  点击pause/resume按扭可暂停/继续回放',
                  anchor='w', justify='left', font=font.Font(size=14)) \
-          .grid(row=11, sticky='w', padx=5)
-        tk.Label(window_help, text='5)可以根据需要选择不同的开局局面，\n'
+          .grid(row=12, sticky='w', padx=5)
+        tk.Label(window_help, text='6)可以根据需要选择不同的开局局面，\n'
                                    '  局面可在init_boards.py中添加。',
                  anchor='w', justify='left', font=font.Font(size=14)) \
-          .grid(row=12, sticky='w', padx=5)
+          .grid(row=13, sticky='w', padx=5)
+        tk.Label(window_help, text='3.规则',
+                 font=font.Font(size=16, weight='bold')).grid(row=0, sticky='w',
+                                                              padx=5)
 
 
     @staticmethod

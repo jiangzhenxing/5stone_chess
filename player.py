@@ -161,9 +161,9 @@ class ValuePlayer(DQNPlayer):
 
 
 class MCTSPlayer(ComputerPlayer):
-    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, policy_model, worker_model, init_board, first_player):
+    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, policy_model, value_model, init_board, first_player):
         ComputerPlayer.__init__(self, name, stone_val, signal, winner_text, clock, play_func, None, init_board, first_player)
-        self.mcts_process = MCTSProcess(policy_model, worker_model, init_board, first_player, stone_val)
+        self.mcts_process = MCTSProcess(policy_model, value_model, init_board, first_player, stone_val)
 
     def load_model(self):
         return None
