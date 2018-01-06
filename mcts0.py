@@ -494,15 +494,17 @@ class SimulateProcess:
 
 def train():
     from multiprocessing import Queue, Lock
+    import os
     record_queue = Queue()
     model_queue = Queue()
     weight_lock = Lock()
     weights_file = 'model/alpha0/weights'
     value_model = ValueNetwork(output_activation='sigmoid')
-    value_model.model.load_weights(weights_file)
-    for _ in range(3):
+    if os.path.exists(weights_file):
+        value_model.model.load_weights(weights_file)
+    else:
         value_model.model.save_weights(weights_file)
-        model_queue.put(weights_file)
+    for _ in range(3):
         SimulateProcess(record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25).start()
 
     for i in range(2 ** 32):
@@ -510,10 +512,8 @@ def train():
         records = record_queue.get()
         logger.info('records: %s', len(records))
         value_model.train(records, epochs=5)
-        # model_queue.put(value_model)
         with weight_lock:
             value_model.model.save_weights(weights_file)
-            model_queue.put(weights_file)
         if i % 100 == 0:
             value_model.save_model('model/alpha0/value_network_%05dh.model' % (i // 100))
 
