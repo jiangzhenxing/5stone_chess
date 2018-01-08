@@ -9,19 +9,14 @@ from value_network import ValueNetwork
 import chess_rule as rule
 import util
 import logging
+import sys
 
 logger = logging.getLogger('train')
 logger_tree = logging.getLogger('tree')
-
-# policy = PolicyNetwork.load('model/model_149/convolution_policy_network_5995.model')
-# worker = policy
-# expansion_gate = 25
-# lambda_ = 0
-import sys
 sys.setrecursionlimit(10000) # 最大递归深度设置为一万
 
 class Node:
-    def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False, final=False):
+    def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False, final=False, value_decay=0.9):
         self.board = board
         self.player = player
         self.tree = tree
@@ -29,63 +24,86 @@ class Node:
         self.parent_edge = parent_edge
         self.expanded = expanded
         self.final = final
+        self.value_decay = value_decay
         self.board_str = ''.join(map(str, board.flatten()))
         self.sub_edge = []
         tree.set_depth(level)
         tree.n_node += 1
 
     def predict(self):
-        return max(self.sub_edge, key=lambda e: e.n)
+        """
+        优势时不重覆走棋
+        """
+        edges = self.sub_edge.copy()
+        me = max(edges, key=lambda e: e.n)
+        while me.v > 0.5 and len(edges) > 1 and (self.board_str, self.player, me.a) in self.tree.predicted:
+            edges.remove(me)
+            me_ = max(edges, key=lambda e:e.n)
+            if me_.v > 0.5:
+                me = me_
+            else:
+                break
+        return me
 
     def search(self, walked):
         if self.final:
             value = 0
             player = self.player
         elif not self.expanded:
-            self.expansion(walked)
-            e = self.selection()
+            self.expansion()
+            e = self.selection(walked)
             value = e.v
             player = self.player
             logger.debug('level:%s, value:%s, player:%s', self.level, value, player)
         elif self.level > 1000:
-            e = self.selection()
+            e = self.selection(walked)
             value = e.v
             player = self.player
         else:
-            e = self.selection()
+            e = self.selection(walked)
             walked.add((self.board_str, self.player, e.a))
             value, player = e.down_node.search(walked)
         self.update(value, player)
-        return value, player
+        return value * self.value_decay, player
 
     def update(self, value, player):
         if self.parent_edge:
             pe = self.parent_edge
             if pe.upper_node.player != player:
                 value = 1 - value
+                # value = -value
             pe.n += 1
             # v0 = pe.v
             pe.v = pe.v + (value - pe.v) / pe.n
             # logger.info('player:%s, value:%s, old v:%s, new v:%s', pe.upper_node.player, value, v0, pe.v)
 
-    def selection(self):
+    def selection(self, walked):
         """
-        返加Q值最大的一条边
+        返加Q值最大且之前未走过的一条边
         """
-        return max(self.sub_edge, key=lambda e:e.q())
+        edges = self.sub_edge.copy()
+        me = max(edges, key=lambda e:e.q())
+        while me.v > 0.5 and len(edges) > 1 and (self.board_str, self.player, me.a) in walked:
+            edges.remove(me)
+            me_ = max(edges, key=lambda e:e.q())
+            if me_.v > 0.5:
+                me = me_
+            else:
+                break
+        return me
 
     def policy(self):
         pass
 
-    def expansion(self, walked):
+    def expansion(self):
         board,player = self.board, self.player
         actions = rule.valid_actions(board, player)
-        actions_ = list(filter(lambda a:(self.board_str, player, a) not in walked, actions))
-        if len(actions_) == 0:
+        # actions_ = list(filter(lambda a:(self.board_str, player, a) not in walked, actions))
+        # if len(actions_) == 0:
             # 全部已经走过，重新选
-            actions_ = actions
-        values = [self.tree.value.q(board, from_, act) for from_,act in actions_]
-        for action,value in zip(actions_, values):
+            # actions_ = actions
+        values = [self.tree.value.q(board, from_, act) for from_,act in actions]
+        for action,value in zip(actions, values):
             e = Edge(upper_node=self, a=action, v=value, p=0, lambda_=self.tree.lambda_)
             self.add_edge(e)
         values = [e.v for e in self.sub_edge]
@@ -169,7 +187,7 @@ class MCTS:
         self.value = value_model
         self.root = Node(board, player, tree=self)
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
-        self.root.expansion(set())
+        self.root.expansion()
 
     def search(self, max_search=0, max_search_time=0):
         self.searching = True
@@ -178,7 +196,8 @@ class MCTS:
         start_time = time.time()
         while not self.stop and self.n_search < max_search and time.time()-start_time < max_search_time:
             self.value.predicts.update(self.predicted)
-            self.root.search(set())
+            walked = self.predicted.copy()
+            self.root.search(walked)
             self.n_search += 1
             self.value.clear()
             self.value.episode += 1
@@ -224,7 +243,7 @@ class MCTS:
             rule.move_by_action(board, *action)
             node = Node(rule.flip_board(board), -player, tree=self)
         if not node.expanded:
-            node.expansion(set())
+            node.expansion()
         self.root = node
         self.root.parent_edge = None
         self.root.level = 1

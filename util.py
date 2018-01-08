@@ -46,6 +46,14 @@ def find_1st(L, func):
         if func(e):
             return e
 
+def choose_max_random(a):
+    """
+    随机选取a中最大的一个值
+    """
+    a = np.array(a)
+    idx = np.argwhere(a == a.max())
+    return tuple(random_choice(idx))
+
 models = {}
 def load_model(filepath):
     if filepath in models:
