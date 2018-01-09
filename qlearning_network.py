@@ -34,12 +34,19 @@ class DQN:
         self.valid = None
         self.vq = None
         self.episode = 0 # 第几次训练
-        self.model = load_model(filepath) if filepath else self.create_model()
+        if filepath:
+            self.model = load_model(filepath)
+            out = self.model.get_layer(index=-1)
+            l = 0.01
+            out.kernel_regularizer = l2(l)
+            out.bias_regularizer = l2(l)
+        else:
+            self.model = self.create_model()
 
     def create_model(self):
         # 定义顺序模型
         model = Sequential()
-        l = 1e-3
+        l = 0.01
         # 第一个卷积层
         model.add(Convolution2D(
             filters=100,        # 卷积核/滤波器个数
@@ -335,7 +342,7 @@ def train():
     #         n0.save_model('model/qlearning_network/DQN_%s_%05dw.model' % (activation, i // 10000))
     for i in range(0, episode + 1, 1):
         train_once(n0, n1, i, activation, init='fixed')
-        if i % 1000 == 0:
+        if i % 10000 == 0:
             n0.save_model('model/qlearning_network/DQN_fixed_%s_%05dw.model' % (activation, i // 10000))
 
 

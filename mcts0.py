@@ -16,7 +16,7 @@ logger_tree = logging.getLogger('tree')
 sys.setrecursionlimit(10000) # 最大递归深度设置为一万
 
 class Node:
-    def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False, final=False, value_decay=0.9):
+    def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False, final=False, value_decay=1):
         self.board = board
         self.player = player
         self.tree = tree
@@ -46,8 +46,9 @@ class Node:
         return me
 
     def search(self, walked):
+        dis = 1
         if self.final:
-            value = 0
+            value = 0   # -0.0005
             player = self.player
         elif not self.expanded:
             self.expansion()
@@ -61,17 +62,18 @@ class Node:
             player = self.player
         else:
             e = self.selection(walked)
-            walked.add((self.board_str, self.player, e.a))
-            value, player = e.down_node.search(walked)
-        self.update(value, player)
-        return value * self.value_decay, player
+            # walked.add((self.board_str, self.player, e.a))
+            value, player, dis = e.down_node.search(walked)
+        self.update(value, player, dis)
+        return value, player, dis + 1
 
-    def update(self, value, player):
+    def update(self, value, player, dis):
         if self.parent_edge:
             pe = self.parent_edge
             if pe.upper_node.player != player:
                 value = 1 - value
                 # value = -value
+            value = value * self.value_decay ** dis
             pe.n += 1
             # v0 = pe.v
             pe.v = pe.v + (value - pe.v) / pe.n
@@ -151,12 +153,12 @@ class Edge:
         self.win = result == rule.WIN
         assert p != np.nan
         assert v != np.nan
-        # if self.win:
-        #     self.v = 1
+        if self.win:
+            self.v = 1  # 1.0005
 
     def q(self):
-        # if self.win:
-        #     return 1
+        if self.win:
+            return 2
         q = self.l * self.v # Q
         u = self.p / self.n
         return q + u
@@ -170,11 +172,12 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, max_search=1000, max_search_time=600):
+    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, max_search=1000, max_search_time=300, min_search_time=20):
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
         self.max_search = max_search            # 最大的搜索次数
         self.max_search_time = max_search_time  # 最大的搜索时间(s)
+        self.min_search_time = min_search_time
         self.searching = False
         self.stop = False
         self.stop_event = Event()
@@ -194,7 +197,9 @@ class MCTS:
         if max_search == 0: max_search = self.max_search
         if max_search_time == 0: max_search_time = self.max_search_time
         start_time = time.time()
-        while not self.stop and self.n_search < max_search and time.time()-start_time < max_search_time:
+        while not self.stop and time.time()-start_time < max_search_time:
+            if time.time()-start_time > self.min_search_time and self.n_search > max_search:
+                break
             self.value.predicts.update(self.predicted)
             walked = self.predicted.copy()
             self.root.search(walked)
@@ -414,11 +419,12 @@ class MCTSProcess:
 
 
 class SimulateProcess:
-    def __init__(self, record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25):
+    def __init__(self, record_queue, model_queue, weight_lock, weights_file, init_board='random', epsilon=1.0, epsilon_decay=0.25):
         self.record_queue = record_queue
         self.model_queue = model_queue
         self.weight_lock = weight_lock
         self.weights_file = weights_file
+        self.init_board = init_board
         self.epsilon = epsilon
         self._epsilon = epsilon
         self.epsilon_decay = epsilon_decay
@@ -430,7 +436,9 @@ class SimulateProcess:
         value_model = ValueNetwork(output_activation='sigmoid')
         for i in range(2 ** 32):
             logger.info('simulate %s', i)
-            board = rule.random_init_board()
+            self.episode = i
+            self.decay_epsilon()
+            board = rule.random_init_board() if self.init_board == 'random' else rule.init_board()
             player = 1
             # value_model_params = self.model_queue.get()
             with self.weight_lock:
@@ -442,8 +450,6 @@ class SimulateProcess:
             self.record_queue.put(records)
             if i % 1000 == 0:
                 records.save('records/train/alpha0/1st_')
-            self.episode = i
-            self.decay_epsilon()
 
     def epsilon_greedy(self, board, player, valid_action, ts):
         """
@@ -518,7 +524,7 @@ def train():
     model_queue = Queue()
     weight_lock = Lock()
     weights_file = 'model/alpha0/weights'
-    value_model = ValueNetwork(output_activation='sigmoid')
+    value_model = ValueNetwork(output_activation='sigmoid', filepath='model/alpha0/value_network_00016h.model')
     if os.path.exists(weights_file):
         value_model.model.load_weights(weights_file)
     else:
@@ -526,7 +532,7 @@ def train():
     for _ in range(3):
         SimulateProcess(record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25).start()
 
-    for i in range(2 ** 32):
+    for i in range(1600, 2 ** 32):
         logger.info('.......... train %s ..............', i)
         records = record_queue.get()
         logger.info('records: %s', len(records))

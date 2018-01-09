@@ -20,7 +20,7 @@ class ValueNetwork:
     """
     v = 1 if win else 0
     """
-    def __init__(self, epsilon=1.0, epsilon_decay=0.15, output_activation='linear', filepath=None):
+    def __init__(self, epsilon=1.0, epsilon_decay=0.15, output_activation='sigmoid', filepath=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
@@ -32,7 +32,15 @@ class ValueNetwork:
         self.valid = None
         self.vq = None
         self.episode = 0 # 第几次训练
-        self.model = load_model(filepath) if filepath else self.create_model()
+        if filepath:
+            self.model = load_model(filepath)
+            out = self.model.get_layer(index=-1)
+            l = 0.01
+            out.kernel_regularizer = l2(l)
+            out.bias_regularizer = l2(l)
+        else:
+            self.model = self.create_model()
+        # self.model = load_model(filepath) if filepath else self.create_model()
 
     def create_model(self):
         def identity_block(x, nb_filter, kernel_size=3):
@@ -296,6 +304,10 @@ def simulate(nw0, nw1, activation, init='fixed'):
 @print_use_time()
 def train_once(n0, n1, i, activation, init='fixed'):
     logging.info('train: %d', i)
+    n0.episode = i
+    n1.episode = i
+    n0.decay_epsilon()
+    n1.decay_epsilon()
     records, winner = simulate(n0, n1, activation, init)
     if records.length() == 0:
         return
@@ -305,27 +317,25 @@ def train_once(n0, n1, i, activation, init='fixed'):
     n0.train(records, epochs=1)
     n0.clear()
     n1.clear()
-    n0.episode = i
-    n1.episode = i
-    n0.decay_epsilon()
-    n1.decay_epsilon()
+
 
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid' # linear, sigmoid
-    n0 = ValueNetwork(output_activation=activation)
+    n0 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_sigmoid_00136w.model')
     n1 = ValueNetwork(output_activation=activation)
     n1.copy(n0)
     episode = 10000000
-    for i in range(episode+1):
+    begin = 1360000
+    for i in range(begin, 3000000+1):
         train_once(n0, n1, i, activation, init='random')
         if i % 10000 == 0:
-            n0.save_model('model/value_network/value_network_%s_%05dw.model' % (activation, i // 10000))
-    # for i in range(episode+1, episode*2 + 1, 1):
-    #     train_once(n0, n1, i, init='fixed')
-    #     if i % 1000 == 0:
-    #         n0.save_model('model/DQN_%04d.model' % (i // 100))
+            n0.save_model('model/value_network/value_network_random_%05dw.model' % (i // 10000))
+    for i in range(3000000, 4000000 + 1):
+        train_once(n0, n1, i, init='fixed')
+        if i % 1000 == 0:
+            n0.save_model('model/value_network/value_network_fixed_%05dw.model' % (i // 10000))
 
 
 if __name__ == '__main__':

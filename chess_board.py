@@ -75,7 +75,7 @@ class ChessBoard:
                           ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
                           ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_fixed_sigmoid_00029w.model'}),
                           ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_sigmoid_00126w.model'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'model/value_network/value_network_sigmoid_00126w.model', 'value_model':'model/value_network/value_network_sigmoid_00126w.model'}),]
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/value_network/value_network_sigmoid_00126w.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
@@ -167,7 +167,7 @@ class ChessBoard:
             if messagebox.askokcancel(title='请确认', message='确定停止当前棋局?'):
                 self.stop()
             return
-        init_board = init_boards[self.board_var.get()]
+        init_board = np.array(init_boards[self.board_var.get()])
         self.init_stone(init_board)
         first_player = self.first_player.get()
         player_name = self.player_var.get()
