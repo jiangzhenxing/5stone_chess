@@ -40,6 +40,7 @@ class DQN:
             l = 0.01
             out.kernel_regularizer = l2(l)
             out.bias_regularizer = l2(l)
+            self.model.optimizer = SGD(lr=2e-4)
         else:
             self.model = self.create_model()
 
@@ -107,7 +108,7 @@ class DQN:
                             ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD(lr=1e-3)
+        opt = SGD(lr=2e-4)
         # loss function
         loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
@@ -228,7 +229,7 @@ class DQN:
     def value_to_probs(values):
         values = np.array(values)
         # 对values进行少量加减，以防止出现0
-        x = np.log(0.0001 + values) - np.log(1.0001 - values)
+        x = np.log(1e-15 + values) - np.log(1 + 1e-15 - values)
         y = np.e ** x
         return y / y.sum()
 
@@ -332,18 +333,19 @@ def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid'     # linear, selu, sigmoid
-    n0 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_sigmoid_00387.model')
-    n1 = DQN(output_activation=activation)
+    n0 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_sigmoid_487_00505w.model')
+    n1 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_sigmoid_487_00505w.model')
     n1.copy(n0)
-    episode = 10000000
-    # for i in range(episode+1):
-    #     train_once(n0, n1, i, activation, init='random')
-    #     if i % 10000 == 0:
-    #         n0.save_model('model/qlearning_network/DQN_%s_%05dw.model' % (activation, i // 10000))
-    for i in range(0, episode + 1, 1):
+    episode = 500000
+    begin = 5050000
+    for i in range(begin, begin+episode+1):
+        train_once(n0, n1, i, activation, init='random')
+        if i % 10000 == 0:
+            n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, i // 10000))
+    for i in range(begin+episode+1, episode*2 + 1):
         train_once(n0, n1, i, activation, init='fixed')
         if i % 10000 == 0:
-            n0.save_model('model/qlearning_network/DQN_fixed_%s_%05dw.model' % (activation, i // 10000))
+            n0.save_model('model/qlearning_network/DQN_fixed_%s_505_%05dw.model' % (activation, i // 10000))
 
 
 if __name__ == '__main__':

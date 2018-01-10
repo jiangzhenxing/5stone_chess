@@ -419,7 +419,7 @@ class MCTSProcess:
 
 
 class SimulateProcess:
-    def __init__(self, record_queue, model_queue, weight_lock, weights_file, init_board='random', epsilon=1.0, epsilon_decay=0.25):
+    def __init__(self, record_queue, model_queue, weight_lock, weights_file, init_board='random', epsilon=1.0, epsilon_decay=0.25, begin=0):
         self.record_queue = record_queue
         self.model_queue = model_queue
         self.weight_lock = weight_lock
@@ -428,13 +428,14 @@ class SimulateProcess:
         self.epsilon = epsilon
         self._epsilon = epsilon
         self.epsilon_decay = epsilon_decay
+        self.begin = begin
         self.episode = 0
         self.predicts = set()
 
     def _start(self):
         logger.info('start...')
         value_model = ValueNetwork(output_activation='sigmoid')
-        for i in range(2 ** 32):
+        for i in range(self.begin, 2 ** 32):
             logger.info('simulate %s', i)
             self.episode = i
             self.decay_epsilon()
@@ -443,7 +444,7 @@ class SimulateProcess:
             # value_model_params = self.model_queue.get()
             with self.weight_lock:
                 value_model.model.load_weights(self.weights_file)
-            ts = MCTS(board=board.copy(), player=player, policy_model=None, value_model=value_model, max_search=50)
+            ts = MCTS(board=board.copy(), player=player, policy_model=None, value_model=value_model, max_search=50, min_search_time=0)
             records, winner = self.simulate(ts, board, player)
             if records.length() == 0:
                 continue
@@ -524,15 +525,16 @@ def train():
     model_queue = Queue()
     weight_lock = Lock()
     weights_file = 'model/alpha0/weights'
-    value_model = ValueNetwork(output_activation='sigmoid', filepath='model/alpha0/value_network_00016h.model')
+    begin = 2000
+    value_model = ValueNetwork(output_activation='sigmoid', filepath='model/alpha0/value_network_00020h.model')
     if os.path.exists(weights_file):
         value_model.model.load_weights(weights_file)
     else:
         value_model.model.save_weights(weights_file)
     for _ in range(3):
-        SimulateProcess(record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25).start()
+        SimulateProcess(record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25, begin=begin).start()
 
-    for i in range(1600, 2 ** 32):
+    for i in range(begin+1, 2 ** 32):
         logger.info('.......... train %s ..............', i)
         records = record_queue.get()
         logger.info('records: %s', len(records))

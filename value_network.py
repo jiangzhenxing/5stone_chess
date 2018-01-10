@@ -5,6 +5,7 @@ from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
 from keras.layers.merge import add
 import chess_rule as rule
+import util
 from util import add_print_time_fun, print_use_time, load_model
 from record import Record
 import logging
@@ -26,21 +27,18 @@ class ValueNetwork:
         self._epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.output_activation = output_activation
+        self.model_file = filepath
         self.predicts = set()
         # 跟踪上一步的值，供调试
         self.q_value = None
         self.valid = None
         self.vq = None
         self.episode = 0 # 第几次训练
-        if filepath:
-            self.model = load_model(filepath)
-            out = self.model.get_layer(index=-1)
-            l = 0.01
-            out.kernel_regularizer = l2(l)
-            out.bias_regularizer = l2(l)
-        else:
-            self.model = self.create_model()
-        # self.model = load_model(filepath) if filepath else self.create_model()
+        self.model = self.load_model(filepath) if filepath else self.create_model()
+
+    @staticmethod
+    def load_model(model_file):
+        return util.load_model(model_file)
 
     def create_model(self):
         def identity_block(x, nb_filter, kernel_size=3):
@@ -219,7 +217,7 @@ class ValueNetwork:
     def value_to_probs(values):
         values = np.array(values)
         # 对values进行少量加减，以防止出现0
-        x = np.log(0.0001 + values) - np.log(1.0001 - values)
+        x = np.log(1e-15 + values) - np.log(1 + 1e-15 - values)
         y = np.e ** x
         return y / y.sum()
 
@@ -324,7 +322,7 @@ def train():
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid' # linear, sigmoid
     n0 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_sigmoid_00136w.model')
-    n1 = ValueNetwork(output_activation=activation)
+    n1 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_sigmoid_00136w.model')
     n1.copy(n0)
     episode = 10000000
     begin = 1360000
