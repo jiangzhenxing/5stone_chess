@@ -21,7 +21,7 @@ class ValueNetwork:
     """
     v = 1 if win else 0
     """
-    def __init__(self, epsilon=1.0, epsilon_decay=0.15, output_activation='sigmoid', filepath=None):
+    def __init__(self, epsilon=1.0, epsilon_decay=0.001, output_activation='sigmoid', filepath=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
@@ -230,7 +230,7 @@ class ValueNetwork:
         return q2
 
     def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * (1 + self.episode))
 
     @staticmethod
     def random_choice(a):
@@ -273,6 +273,8 @@ def simulate(nw0, nw1, activation, init='fixed'):
                 records.add3(bd, from_, action, reward, win=command==rule.WIN)
             elif activation == 'linear':
                 records.add2(bd, from_, action, reward, win=command==rule.WIN)
+            elif activation == 'selu':
+                records.add4(bd, from_, action, reward, win=command==rule.WIN)
             else:
                 raise ValueError
         except NoActionException:
@@ -290,7 +292,6 @@ def simulate(nw0, nw1, activation, init='fixed'):
             raise e
         if command == rule.WIN:
             logging.info('%s WIN, step use: %s, epsilon:%s', str(player), records.length(), nw.epsilon)
-
             return records, player
         if records.length() > 10000:
             logging.info('走子数过多: %s', records.length())
@@ -300,7 +301,7 @@ def simulate(nw0, nw1, activation, init='fixed'):
             board = rule.flip_board(board)
 
 @print_use_time()
-def train_once(n0, n1, i, activation, init='fixed'):
+def train_once(n0, n1, i, activation, init='random'):
     logging.info('train: %d', i)
     n0.episode = i
     n1.episode = i
@@ -309,12 +310,11 @@ def train_once(n0, n1, i, activation, init='fixed'):
     records, winner = simulate(n0, n1, activation, init)
     if records.length() == 0:
         return
-    if i%1000==0:
-        records.save('records/train/value_network/' + ('1st_' if init == 'fixed' else ''))
     n1.copy(n0)
     n0.train(records, epochs=1)
     n0.clear()
     n1.clear()
+    return records
 
 
 def train():
@@ -327,11 +327,15 @@ def train():
     episode = 10000000
     begin = 1360000
     for i in range(begin, 3000000+1):
-        train_once(n0, n1, i, activation, init='random')
+        records = train_once(n0, n1, i, activation, init='random')
+        if i % 1000 == 0:
+            records.save('records/train/value_network/')
         if i % 10000 == 0:
             n0.save_model('model/value_network/value_network_random_%05dw.model' % (i // 10000))
     for i in range(3000000, 4000000 + 1):
-        train_once(n0, n1, i, init='fixed')
+        records = train_once(n0, n1, i, init='fixed')
+        if i % 1000 == 0:
+            records.save('records/train/value_network/1st_')
         if i % 1000 == 0:
             n0.save_model('model/value_network/value_network_fixed_%05dw.model' % (i // 10000))
 

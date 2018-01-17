@@ -6,43 +6,29 @@ from keras.regularizers import l2
 import chess_rule as rule
 from util import add_print_time_fun, print_use_time, load_model
 from record import Record
+from value_network import ValueNetwork, NoActionException, simulate
 import logging
 
 
 logger = logging.getLogger('train')
 
 
-class NoActionException(BaseException):
-    pass
-
-
-class DQN:
+class DQN(ValueNetwork):
     """
     q = 1 if win else 0
-    value = r0 - r'0 + γr1 - γr'1 + ...
-    value(s0) = r0 - r'0 + γvalue(s1)
     """
-    def __init__(self, epsilon=1.0, epsilon_decay=0.15, output_activation='linear', filepath=None):
-        self.output_activation = output_activation
-        self.epsilon = epsilon
-        self._epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.output_activation = output_activation
-        self.predicts = set()
-        # 跟踪上一步的值，供调试
-        self.q_value = None
-        self.valid = None
-        self.vq = None
-        self.episode = 0 # 第几次训练
-        if filepath:
-            self.model = load_model(filepath)
-            out = self.model.get_layer(index=-1)
-            l = 0.01
-            out.kernel_regularizer = l2(l)
-            out.bias_regularizer = l2(l)
-            self.model.optimizer = SGD(lr=2e-4)
-        else:
-            self.model = self.create_model()
+    @staticmethod
+    def load_model(model_file):
+        model = load_model(model_file)
+        '''
+        # 这里中途修改了一下输出层的正则化参数和SGD的学习率
+        out = model.get_layer(index=-1)
+        l = 0.01
+        out.kernel_regularizer = l2(l)
+        out.bias_regularizer = l2(l)
+        model.optimizer = SGD(lr=1e-4, decay=1e-6)
+        '''
+        return model
 
     def create_model(self):
         # 定义顺序模型
@@ -108,7 +94,7 @@ class DQN:
                             ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD(lr=2e-4)
+        opt = SGD(lr=2e-4, decay=1e-6)
         # loss function
         loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
@@ -146,171 +132,10 @@ class DQN:
         bias = np.ones((5, 5, 1))
         return np.concatenate((space, self, opponent, from_location, to_location, space2, self2, opponent2, is_win, bias), axis=2)
 
-    def q(self, board, from_, action):
-        x = self.feature(board, from_, action)
-        x = np.array([x])
-        q = self.model.predict(x)[0][0]
-        return q
-
-    def maxq(self, board, player):
-        q = [self.q(board,from_,action) for from_,action in rule.valid_actions(board,player)]
-        return max(q)
-
-    def value(self, board, player):
-        return self.maxq(board, player)
-
-    def epsilon_greedy(self, board, valid_action, q):
-        """
-        使用epsilon-greedy策略选择下一步动作
-        以epsilon以内的概率随机选择动作
-        以1-epsilon的概率选择最大Q值的动作
-        :return: 下一个动作: (from,to)
-        """
-        if np.random.random() > self.epsilon:
-            # 选取Q值最大的
-            if q is None:
-                q = [self.q(board, from_, action) for from_, action in valid_action]
-            return self.pi_star(valid_action, q),q
-        else:
-            # 随机选择
-            return self.random_choice(valid_action),q
-
-    def pi_star(self, valid_action, q):
-        """
-        选择Q值最大的动作，即最优策略
-        """
-        maxq = np.max(q)
-        idxes = np.argwhere(q == maxq)
-        action = valid_action[self.random_choice(idxes)[0]]
-        # logger.info('maxq:%s, idxes:%s, select:%s', maxq, idxes, action)
-        return action
-
-    def predict(self, board, player):
-        valid = rule.valid_actions(board, player)
-        q = [self.q(board, from_, action) for from_, action in valid]
-        return self.pi_star(valid, q),(valid,q)
-
-    def policy(self, board, player):
-        valid = rule.valid_actions(board, player)
-        q = None
-        self.set_pre(q, valid, q)
-        if len(valid) == 0:
-            raise NoActionException
-        board_str = ''.join(map(str, board.flatten()))
-        while True:
-            (from_,action),q = self.epsilon_greedy(board, valid, q)
-            if (board_str,from_,action) not in self.predicts or len(valid) == 1:
-                self.predicts.add((board_str,from_,action))
-                self.set_pre(q, valid, None)
-                if self.episode % 10 == 0:
-                    logger.info('action:%s,%s', from_, action)
-                    # logger.info('valid:%s', valid)
-                    logger.info('q:%s', q)
-                return from_,action
-            else:
-                # 将已经走过的位置移除，不再选择
-                idx = valid.index((from_,action))
-                valid.pop(idx)
-                if q:
-                    q.pop(idx)
-
-    def train(self, records, batch_size=1, epochs=1, verbose=0):
-        x_train = []
-        y_train = []
-        for bd, from_, action, reward, _ in records:
-            x = self.feature(bd, from_, action)
-            x_train.append(x)
-            y_train.append(reward)
-        x_train = np.array(x_train, copy=False)
-        y_train = np.array(y_train, copy=False)
-        self.model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=verbose)
-
-    @staticmethod
-    def value_to_probs(values):
-        values = np.array(values)
-        # 对values进行少量加减，以防止出现0
-        x = np.log(1e-15 + values) - np.log(1 + 1e-15 - values)
-        y = np.e ** x
-        return y / y.sum()
-
-    def probabilities(self, board, player):
-        valid = rule.valid_actions(board, player)
-        qs = [self.q(board, from_, action) for from_, action in valid]
-        q2 = np.zeros((5,5,4))
-        for (from_, action),q in zip(valid,qs):
-            q2[from_][action] = q
-        return q2
-
-    def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
-
-    @staticmethod
-    def random_choice(a):
-        return a[np.random.randint(len(a))]
-
     @staticmethod
     def load(modelfile, epsilon=0.3):
         return DQN(epsilon=epsilon, filepath=modelfile)
 
-    def set_pre(self, q, valid, vq):
-        self.q_value = q
-        self.valid = valid
-        self.vq = vq
-
-    def copy(self, other):
-        self.model.set_weights(other.model.get_weights())
-
-    def clear(self):
-        self.predicts.clear()
-
-    def save_model(self, filepath):
-        self.model.save(filepath)
-
-
-# @print_use_time()
-def simulate(nw0, nw1, activation, init='fixed'):
-    board = rule.init_board() if init=='fixed' else rule.random_init_board()
-    player = 1
-    records = Record()
-    while True:
-        nw = nw0 if player == 1 else nw1
-        try:
-            bd = board.copy()
-            from_, action = nw.policy(board, player)
-            assert board[from_] == player
-            to_ = tuple(np.add(from_, rule.actions_move[action]))
-            command,eat = rule.move(board, from_, to_)
-            reward = len(eat)
-            if activation == 'sigmoid':
-                records.add3(bd, from_, action, reward, win=command==rule.WIN)
-            elif activation == 'linear':
-                records.add4(bd, from_, action, reward, win=command==rule.WIN)
-            elif activation == 'selu':
-                records.add4(bd, from_, action, reward, win=command==rule.WIN)
-            else:
-                raise ValueError(activation)
-        except NoActionException:
-            # 随机初始化局面后一方无路可走
-            return Record(),0
-        except Exception as e:
-            logging.info('board is:\n%s', board)
-            logging.info('player is: %s', player)
-            valid = rule.valid_actions(board, player)
-            logging.info('valid is:\n%s', valid)
-            logging.info('predict is:\n%s', nw.q_value)
-            logging.info('valid action is:\n%s', nw.valid)
-            logging.info('from:%s, action:%s', from_, action)
-            records.save('records/train/1st_')
-            raise e
-        if command == rule.WIN:
-            logging.info('%s WIN, step use: %s, epsilon:%s', str(player), records.length(), nw.epsilon)
-            return records, player
-        if records.length() > 10000:
-            logging.info('走子数过多: %s', records.length())
-            return Record(),0
-        player = -player
-        if init == 'fixed':
-            board = rule.flip_board(board)
 
 @print_use_time()
 def train_once(n0, n1, i, activation, init='fixed'):
@@ -322,30 +147,34 @@ def train_once(n0, n1, i, activation, init='fixed'):
     records, winner = simulate(n0, n1, activation, init)
     if records.length() == 0:
         return
-    if i%1000==0:
-        records.save('records/train/qlearning_network/1st_')
-    n1.copy(n0)
+    if i % 10 == 0:
+        n1.copy(n0)
     n0.train(records, epochs=1)
     n0.clear()
     n1.clear()
+    return records
 
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid'     # linear, selu, sigmoid
-    n0 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_sigmoid_487_00505w.model')
-    n1 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_sigmoid_487_00505w.model')
+    n0 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model')
+    n1 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model')
     n1.copy(n0)
-    episode = 500000
-    begin = 5050000
+    episode = 1000000
+    begin = 5760000
+    '''
     for i in range(begin, begin+episode+1):
         train_once(n0, n1, i, activation, init='random')
         if i % 10000 == 0:
             n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, i // 10000))
-    for i in range(begin+episode+1, episode*2 + 1):
-        train_once(n0, n1, i, activation, init='fixed')
+    '''
+    for i in range(begin+1, begin + episode + 1):
+        records = train_once(n0, n1, i, activation, init='fixed')
+        if i % 1000 == 0:
+            records.save('records/train/qlearning_network/1st_')
         if i % 10000 == 0:
-            n0.save_model('model/qlearning_network/DQN_fixed_%s_505_%05dw.model' % (activation, i // 10000))
+            n0.save_model('model/qlearning_network/DQN_fixed_%s_555_%05dw.model' % (activation, i // 10000))
 
 
 if __name__ == '__main__':
