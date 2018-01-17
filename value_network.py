@@ -1,12 +1,11 @@
 import numpy as np
-from keras.models import Model, Sequential
+from keras.models import Model, Sequential, load_model
 from keras.layers import Input, Dense, Convolution2D, Activation, Flatten
 from keras.optimizers import Adam, SGD
 from keras.regularizers import l2
 from keras.layers.merge import add
 import chess_rule as rule
-import util
-from util import add_print_time_fun, print_use_time, load_model
+from util import add_print_time_fun, print_use_time
 from record import Record
 import logging
 
@@ -21,7 +20,7 @@ class ValueNetwork:
     """
     v = 1 if win else 0
     """
-    def __init__(self, epsilon=1.0, epsilon_decay=0.001, output_activation='sigmoid', filepath=None):
+    def __init__(self, epsilon=1.0, epsilon_decay=0.25, output_activation='sigmoid', filepath=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
@@ -38,7 +37,8 @@ class ValueNetwork:
 
     @staticmethod
     def load_model(model_file):
-        return util.load_model(model_file)
+        logger.info('load model in ValueNetwork')
+        return load_model(model_file)
 
     def create_model(self):
         def identity_block(x, nb_filter, kernel_size=3):
@@ -230,7 +230,7 @@ class ValueNetwork:
         return q2
 
     def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * (1 + self.episode))
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
 
     @staticmethod
     def random_choice(a):
@@ -321,18 +321,18 @@ def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid' # linear, sigmoid
-    n0 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_sigmoid_00136w.model')
-    n1 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_sigmoid_00136w.model')
+    n0 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_random_00194w.model')
+    n1 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_random_00194w.model')
     n1.copy(n0)
     episode = 10000000
-    begin = 1360000
-    for i in range(begin, 3000000+1):
+    begin = 1940000
+    for i in range(begin+1, 2000000+1):
         records = train_once(n0, n1, i, activation, init='random')
         if i % 1000 == 0:
             records.save('records/train/value_network/')
         if i % 10000 == 0:
             n0.save_model('model/value_network/value_network_random_%05dw.model' % (i // 10000))
-    for i in range(3000000, 4000000 + 1):
+    for i in range(2000000, 4000000 + 1):
         records = train_once(n0, n1, i, init='fixed')
         if i % 1000 == 0:
             records.save('records/train/value_network/1st_')
