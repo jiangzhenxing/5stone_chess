@@ -104,7 +104,11 @@ class PolicyNetworkPlayer(ComputerPlayer):
             # vp = rule.flip_action_probs(vp)
             p = rule.flip_action_probs(p)
         logger.info('from %s to %s', from_, to_)
-        self.play_func(board, self.stone_val, from_, to_, p)
+
+        rule.move(board, from_, to_)
+        opp_q_table = self.predict_opponent(board)
+        logger.debug(opp_q_table)
+        self.play_func(self.stone_val, from_, to_, p, opp_q_table)
 
     def predict_opponent(self, board):
         """
@@ -142,7 +146,11 @@ class DQNPlayer(ComputerPlayer):
             to_ = rule.flip_location(to_)
             q_table = rule.flip_action_probs(q_table)
         logger.info('from %s to %s', from_, to_)
-        self.play_func(board, self.stone_val, from_, to_, q_table)
+
+        rule.move(board, from_, to_)
+        opp_q_table = self.predict_opponent(board)
+        logger.debug(opp_q_table)
+        self.play_func(self.stone_val, from_, to_, q_table, opp_q_table)
 
     def predict_opponent(self, board):
         """
@@ -174,7 +182,7 @@ class MCTSPlayer(ComputerPlayer):
         else:
             board_self = board.copy()
         def _play():
-            action, q = self.mcts_process.predict(board_self, self.stone_val)
+            action, q, opp_q = self.mcts_process.predict(board_self, self.stone_val)
             logger.info('resv: action:%s', action)
             if action is None:
                 logger.info('_play thread stop...')
@@ -188,7 +196,11 @@ class MCTSPlayer(ComputerPlayer):
                 from_ = rule.flip_location(from_)
                 to_ = rule.flip_location(to_)
                 q_table = rule.flip_action_probs(q_table)
-            self.play_func(board, self.stone_val, from_, to_, q_table)
+            # self.play_func(board, self.stone_val, from_, to_, q_table)
+            opp_q_table = np.zeros((5, 5, 4))
+            for (f, a), q_ in opp_q:
+                opp_q_table[f][a] = q_
+            self.play_func(self.stone_val, from_, to_, q_table, opp_q=opp_q_table)
         Thread(target=_play).start()
 
     def opponent_play(self, board, from_, to_):

@@ -198,9 +198,10 @@ def random_init_board():
     随机初始化棋盘
     """
     board = np.zeros((5, 5))
+    nums = [0,0,0]
     def random_init_stone(stone):
         num = np.random.randint(2, 6)  # 棋子数量 2-5
-        logger.info('%s num is %s', stone, num)
+        nums[stone] = num
         for _ in range(num):
             while True:
                 idx = np.random.randint(25)
@@ -210,12 +211,13 @@ def random_init_board():
                     break
     random_init_stone(1)
     random_init_stone(-1)
+    logger.info('1 num: %s, -1 num: %s', *nums[1:])
     return board
 
-def init_board():
+def init_board(player=1):
     board = np.zeros((5, 5))
-    board[0, :] = -1
-    board[4, :] = 1
+    board[0, :] = -player
+    board[4, :] = player
     return board
 
 def _main():

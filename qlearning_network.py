@@ -6,8 +6,9 @@ from keras.regularizers import l2
 import chess_rule as rule
 from util import add_print_time_fun, print_use_time
 from record import Record
-from value_network import ValueNetwork, NoActionException, simulate
+from value_network import ValueNetwork, train_once
 import logging
+import util
 
 
 logger = logging.getLogger('train')
@@ -21,13 +22,24 @@ class DQN(ValueNetwork):
     def load_model(model_file):
         logger.info('load model in DQN')
         model = load_model(model_file)
+        for l in model.layers:
+            if hasattr(l, 'kernel_regularizer'):
+                print(l.kernel_regularizer)
+                if l.kernel_regularizer:
+                    print(l.kernel_regularizer.get_config())
+        print(model.optimizer.get_config())
+        '''
         # 这里中途修改了一下输出层的正则化参数和SGD的学习率
         for layer in model.layers:
-            # out = model.get_layer(index=-1)
-            l = 1
-            layer.kernel_regularizer = l2(l)
-            layer.bias_regularizer = l2(l)
-        # model.optimizer = SGD(lr=1e-4, decay=1e-6)
+            l = 0.000001
+            layer.kernel_regularizer = None
+            layer.bias_regularizer = None
+        out = model.get_layer(index=-1)
+        l = 0.001
+        out.kernel_regularizer = l2(l)
+        out.bias_regularizer = l2(l)
+        model.optimizer = SGD(lr=1e-4, decay=1e-6)
+        '''
         return model
 
     def create_model(self):
@@ -139,44 +151,27 @@ class DQN(ValueNetwork):
         return DQN(epsilon=epsilon, filepath=modelfile)
 
 
-@print_use_time()
-def train_once(n0, n1, i, activation, init='fixed'):
-    logging.info('train: %d', i)
-    n0.episode = i
-    n1.episode = i
-    n0.decay_epsilon()
-    n1.decay_epsilon()
-    records, winner = simulate(n0, n1, activation, init)
-    if records.length() == 0:
-        return
-    if i % 10 == 0:
-        n1.copy(n0)
-    n0.train(records, epochs=1)
-    n0.clear()
-    n1.clear()
-    return records
-
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid'     # linear, selu, sigmoid
-    n0 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00577w.model')
-    n1 = DQN(output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00577w.model')
+    n0 = DQN(epsilon=1, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model')
+    n1 = DQN(epsilon=1, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model')
     n1.copy(n0)
     episode = 1000000
-    begin = 5770000
+    begin = 5760000
     '''
     for i in range(begin, begin+episode+1):
         train_once(n0, n1, i, activation, init='random')
         if i % 10000 == 0:
-            n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, i // 10000))
+            n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, np.ceil(i / 10000)))
     '''
     for i in range(begin+1, begin + episode + 1):
         records = train_once(n0, n1, i, activation, init='fixed')
         if i % 1000 == 0:
             records.save('records/train/qlearning_network/1st_')
         if i % 1000 == 0:
-            n0.save_model('model/qlearning_network/DQN_fixed_%s_555_%05dw.model' % (activation, i // 10000))
+            n0.save_model('model/qlearning_network/DQN_fixed_%s_555_%05dw.model' % (activation, np.ceil(i / 10000)))
 
 
 if __name__ == '__main__':

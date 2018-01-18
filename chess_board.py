@@ -73,9 +73,9 @@ class ChessBoard:
         player_var = tk.StringVar()
         player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
                           ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
-                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_fixed_sigmoid_555_00577w.model'}),   # DQN_fixed_sigmoid_00029w.model
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model'}),   # DQN_fixed_sigmoid_00029w.model
                           ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_sigmoid_00136w.model'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/qlearning_network/DQN_fixed_sigmoid_00035w.model'}),]
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/qlearning_network/DQN_fixed_sigmoid_00029w.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
@@ -85,28 +85,34 @@ class ChessBoard:
         self.player_choosen = player_choosen
 
         # 开局选择
-        tk.Label(window, text='开局:').place(x=228, y=620)
+        tk.Label(window, text='开局:').place(x=225, y=620)
         board_var = tk.IntVar(0)
         boards = list(range(len(init_boards)))
         board_choosen = ttk.Combobox(window, width=2, textvariable=board_var, values=boards, state='readonly')
         board_choosen.current(0)
-        board_choosen.place(x=270, y=617)
+        board_choosen.place(x=267, y=617)
         self.board_var = board_var
         self.board_choosen = board_choosen
         board_choosen.bind('<<ComboboxSelected>>', self.board_selected)
 
         # 先手
         first_player = tk.IntVar(value=WHITE_VALUE)
-        tk.Radiobutton(window, text='黑先', variable=first_player, value=BLACK_VALUE).place(x=325, y=620)
-        tk.Radiobutton(window, text='白先', variable=first_player, value=WHITE_VALUE).place(x=380, y=620)
+        tk.Radiobutton(window, text='黑先', variable=first_player, value=BLACK_VALUE).place(x=315, y=620)
+        tk.Radiobutton(window, text='白先', variable=first_player, value=WHITE_VALUE).place(x=370, y=620)
         self.first_player = first_player
 
         # 开始按扭
         start_btn_text = tk.StringVar(window, value='start')
-        tk.Button(window, textvariable=start_btn_text, command=self.start).place(x=445, y=617)
+        tk.Button(window, textvariable=start_btn_text, command=self.start, width=3).place(x=425, y=617)
+
+        # 隐藏路径按扭
+        hide_q_str = tk.StringVar(value='hideQ')
+        tk.Button(window, textvariable=hide_q_str, command=self.hide_q, width=4).place(x=483, y=617)
+        self.hide_q_str = hide_q_str
+        self.print_q_flag = True
 
         # 帮助按扭
-        tk.Button(window, text='help', command=self.help).place(x=530, y=617)
+        tk.Button(window, text='help', command=self.help, width=2).place(x=548, y=617)
 
         # ---------------- 第二排按扭 ------------------------------------------
         # 选择棋谱
@@ -205,23 +211,28 @@ class ChessBoard:
         logger.info('%s play...', self.current_player)
         if self.current_player.is_humman():
             # 对手预测走棋
-            bd = self.board()
-            pl = self.current_player.stone_val
-            op = self.opponent().predict_opponent(bd)
-            if op is not None:
-                valid = rule.valid_action(bd, pl)
-                self.show_qtext(op, valid, hide=False)
+            # bd = self.board()
+            # pl = self.current_player.stone_val
+            # op = self.opponent().predict_opponent(bd)
+            # if op is not None:
+            #     valid = rule.valid_action(bd, pl)
+            #     self.show_qtext(op, valid, hide=False)
             return
         board = self.board()
         self.current_player.play(board)
 
-    def _play(self, board, player, from_, to_, p):
+    def _play(self, player, from_, to_, p, opp_q=None):
         logger.info('from:%s, to_:%s', from_, to_)
         logger.debug('p:\n%s', p)
+        board = self.board()
         valid_action = rule.valid_action(board, player)
         logger.debug('valid_action:\n%s', valid_action)
         self.show_qtext(p, valid_action)
         self.show_select(from_, to_)
+        if opp_q is not None:
+            rule.move(board, from_, to_)
+            valid = rule.valid_action(board, -player)
+            self.show_qtext(opp_q, valid, hide=False)
         stone = self.stone(from_)
         def play_later():
             result = self.move_to(stone, to_)
@@ -500,6 +511,8 @@ class ChessBoard:
         """
         显示选择的动作
         """
+        if not self.print_q_flag:
+            return
         self.hide_select()
         a = np.subtract(to_, from_)
         logger.debug('select action is: %s', tuple(a))
@@ -520,6 +533,8 @@ class ChessBoard:
         """
         显示动作的Q值
         """
+        if not self.print_q_flag:
+            return
         if hide:
             self.hide_qtext(valid_action)
         maxq = np.max(qtable)
@@ -543,6 +558,16 @@ class ChessBoard:
         for i, j, k in idx:
             self.canvas.itemconfigure(self.qtext(i, j, k), text='', state=tk.HIDDEN)
 
+    def hide_q(self):
+        if self.hide_q_str.get() == 'hideQ':
+            self.hide_qtext()
+            self.hide_select()
+            self.print_q_flag = False
+            self.hide_q_str.set('showQ')
+        elif self.hide_q_str.get() == 'showQ':
+            self.print_q_flag = True
+            self.hide_q_str.set('hideQ')
+
     def qtext(self, i, j, k):
         return self._qtext[i][j][k]
 
@@ -565,7 +590,7 @@ class ChessBoard:
 
     def help(self):
         window_help = tk.Toplevel(self.window)
-        window_help.geometry('400x600')
+        window_help.geometry('400x620')
         tk.Label(window_help, text='1.规则', font=font.Font(size=16, weight='bold')).grid(row=0, sticky='w', padx=5)
         tk.Label(window_help, text='1)走棋:一次只能上下左右移动一步', font=font.Font(size=14)).grid(row=1, sticky='w', padx=5)
         tk.Label(window_help, text='2)吃子:', font=font.Font(size=14)).grid(row=2, sticky='w', padx=5)
@@ -586,7 +611,7 @@ class ChessBoard:
         canvas.grid(row=3, sticky='w', padx=20)
         text = '  如上所示:\n' \
                '  a.任意一个黑子走至当前位置后\n' \
-               '  b.形成在一条直线上有两个黑子对一个白子\n' \
+               '  b.形成在一条直线上有两个黑子对一个白子(白子在边上)\n' \
                '  c.且这三个棋子是连续的\n' \
                '  d.且该直线上只有这三个棋子时\n' \
                '  白子被吃掉(直线横坚均可)。\n' \
@@ -595,7 +620,7 @@ class ChessBoard:
         tk.Label(window_help, text='3)赢棋:对方棋子少于两个或无路可走时赢棋', font=font.Font(size=14)).grid(row=6, sticky='w', padx=5)
 
         tk.Label(window_help, text='2.使用', font=font.Font(size=16, weight='bold')).grid(row=7, sticky='w', padx=5)
-        tk.Label(window_help, text='1)安装:建议安装anaconda，keras(使用Theano作backend)', font=font.Font(size=14)).grid(row=8, sticky='w', padx=5)
+        tk.Label(window_help, text='1)安装:建议安装anaconda，keras', font=font.Font(size=14)).grid(row=8, sticky='w', padx=5)
         tk.Label(window_help, text='2)开始:选择对手,先手后点击start按扭开始', font=font.Font(size=14)).grid(row=9, sticky='w', padx=5)
         tk.Label(window_help, text='3)走棋:点击己方棋子，移动到目标位置后单击即可落子', font=font.Font(size=14)).grid(row=10, sticky='w', padx=5)
         tk.Label(window_help, text='4)结束:点击stop按扭可结束棋局', font=font.Font(size=14)).grid(row=11, sticky='w', padx=5)
@@ -609,9 +634,8 @@ class ChessBoard:
                                    '  局面可在init_boards.py中添加。',
                  anchor='w', justify='left', font=font.Font(size=14)) \
           .grid(row=13, sticky='w', padx=5)
-        tk.Label(window_help, text='3.规则',
-                 font=font.Font(size=16, weight='bold')).grid(row=0, sticky='w',
-                                                              padx=5)
+        tk.Label(window_help, text='7)点击hideQ/showQ按扭可隐藏/显示Q值', anchor='w', justify='left', font=font.Font(size=14)) \
+          .grid(row=14, sticky='w', padx=5)
 
 
     @staticmethod

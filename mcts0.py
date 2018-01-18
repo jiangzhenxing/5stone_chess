@@ -172,7 +172,7 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, max_search=1000, max_search_time=300, min_search_time=20):
+    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, max_search=500, max_search_time=300, min_search_time=15):
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
         self.max_search = max_search            # 最大的搜索次数
@@ -193,6 +193,7 @@ class MCTS:
         self.root.expansion()
 
     def search(self, max_search=0, max_search_time=0):
+        logger.info('begin search...')
         self.searching = True
         if max_search == 0: max_search = self.max_search
         if max_search_time == 0: max_search_time = self.max_search_time
@@ -206,7 +207,7 @@ class MCTS:
             self.n_search += 1
             self.value.clear()
             self.value.episode += 1
-            # logger.info('search %s', self.n_search)
+            logger.info('search %s', self.n_search)
         logger.info('search over %s', self.n_search)
         self.n_search = 0
         self.show_info()
@@ -226,6 +227,7 @@ class MCTS:
         logger.info('search stopped...')
 
     def predict(self, board, player):
+        logger.info('begin predict...')
         assert (self.root.board == board).all() and self.root.player == player, '%s,player:%s\nroot:\n%s,player:%s' % (board, player, self.root.board, self.root.player)
         self.search()
         e = self.root.predict()
@@ -298,32 +300,42 @@ class COMMAND:
 
 
 class MCTSWorker:
-    def __init__(self, board, first_player, policy_model, value_model, predict_callback, max_search=1000, expansion_gate=50):
+    def __init__(self, board, first_player, policy_model, value_model, predict_callback, max_search=500, expansion_gate=50, max_search_time=15):
+        self.board = board
+        self.first_player = first_player
+        self.policy_model = policy_model
+        self.value_model = value_model
+        self.max_search = max_search
+        self.expansion_gate = expansion_gate
+        self.max_search_time = max_search_time
         self.predict_callback = predict_callback
         self.command_queue = Queue()
         # self.result_queue = Queue()
         self.stopped = False
-        self.ts =  MCTS(board, first_player, policy_model, value_model, max_search=max_search, expansion_gate=expansion_gate)
-        self.ts.show_info()
 
     def start(self):
         Thread(target=self._start).start()
 
     def _start(self):
+        self.ts = MCTS(self.board, self.first_player, self.policy_model, self.value_model,
+                       max_search=self.max_search, max_search_time=self.max_search_time, expansion_gate=self.expansion_gate)
+        self.ts.show_info()
         while True:
             command, board, player, action = self.command_queue.get()
-            logger.info('\nget: %s, command==COMMAND.STOP:%s\n%s\n player:%s action:%s', command, command == COMMAND.STOP, board, player, action)
+            logger.info('\nget: %s, \n%s\n player:%s action:%s', command, board, player, action)
             if command == COMMAND.STOP:
                 logger.info('MCTS WORKER ENDING...')
                 break
             if command == COMMAND.PREDICT:
                 # 走棋
+                logger.info('走棋......')
                 a, q = self.ts.predict(board, player)
                 if self.stopped:
                     self.predict_callback(None, None)
                 else:
-                    self.predict_callback(a,q)
                     self.ts.move_down(self.ts.root.board, self.ts.root.player, a)
+                    opp_q = [(e.a, e.q()) for e in self.ts.root.sub_edge]
+                    self.predict_callback(a, q, opp_q)
                     self.ts.search(max_search=2 ** 32, max_search_time=2 ** 32)
             elif command == COMMAND.MOVE_DOWN:
                 # 对手走棋，向下移动树
@@ -369,15 +381,15 @@ class MCTSProcess:
         self.mcts_end = conn2
         if first_player == -1:
             init_board = rule.flip_board(init_board)
-        self.worker = MCTSWorker(init_board, first_player, self.policy_model, self.value_model, self.predict_callback, max_search=500, expansion_gate=10)
+        self.worker = MCTSWorker(init_board, first_player, self.policy_model, self.value_model, self.predict_callback, max_search=50, max_search_time=15)
         self.stopped = False
 
     def start(self):
         Process(target=self._start).start()
         self.stopped = False
 
-    def predict_callback(self, a, q):
-        self.mcts_end.send((a, q))
+    def predict_callback(self, a, q, opp_q):
+        self.mcts_end.send((a, q, opp_q))
 
     def _start(self):
         logger.info('start...')

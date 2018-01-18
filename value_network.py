@@ -257,11 +257,13 @@ class ValueNetwork:
 
 # @print_use_time()
 def simulate(nw0, nw1, activation, init='fixed'):
-    board = rule.init_board() if init=='fixed' else rule.random_init_board()
-    player = 1
+    player = 1 if np.random.random() > 0.5 else -1
+    logger.info('init:%s, player:%s', init, player)
+    board = rule.init_board(player) if init == 'fixed' else rule.random_init_board()
     records = Record()
+    nws = [None, nw0, nw1]
     while True:
-        nw = nw0 if player == 1 else nw1
+        nw = nws[player] # nw0 if player == 1 else nw1
         try:
             bd = board.copy()
             from_, action = nw.policy(board, player)
@@ -277,6 +279,15 @@ def simulate(nw0, nw1, activation, init='fixed'):
                 records.add4(bd, from_, action, reward, win=command==rule.WIN)
             else:
                 raise ValueError
+            if command == rule.WIN:
+                logging.info('%s WIN, step use: %s, epsilon:%s', str(player), records.length(), nw.epsilon)
+                return records, player
+            if records.length() > 10000:
+                logging.info('走子数过多: %s', records.length())
+                return Record(), 0
+            player = -player
+            if init == 'fixed':
+                board = rule.flip_board(board)
         except NoActionException:
             # 随机初始化局面后一方无路可走
             return Record(),0
@@ -290,18 +301,10 @@ def simulate(nw0, nw1, activation, init='fixed'):
             logging.info('from:%s, action:%s', from_, action)
             records.save('records/train/1st_')
             raise e
-        if command == rule.WIN:
-            logging.info('%s WIN, step use: %s, epsilon:%s', str(player), records.length(), nw.epsilon)
-            return records, player
-        if records.length() > 10000:
-            logging.info('走子数过多: %s', records.length())
-            return Record(),0
-        player = -player
-        if init == 'fixed':
-            board = rule.flip_board(board)
+
 
 @print_use_time()
-def train_once(n0, n1, i, activation, init='random'):
+def train_once(n0, n1, i, activation, init='random', copy_period=1):
     logging.info('train: %d', i)
     n0.episode = i
     n1.episode = i
@@ -310,7 +313,8 @@ def train_once(n0, n1, i, activation, init='random'):
     records, winner = simulate(n0, n1, activation, init)
     if records.length() == 0:
         return
-    n1.copy(n0)
+    if i % copy_period == 0:
+        n1.copy(n0)
     n0.train(records, epochs=1)
     n0.clear()
     n1.clear()
@@ -321,23 +325,24 @@ def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid' # linear, sigmoid
-    n0 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_random_00194w.model')
-    n1 = ValueNetwork(output_activation=activation, filepath='model/value_network/value_network_random_00194w.model')
+    n0 = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_random_00199w.model')
+    n1 = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_random_00199w.model')
     n1.copy(n0)
     episode = 10000000
-    begin = 1940000
-    for i in range(begin+1, 2000000+1):
+    begin = 1990000
+    for i in range(begin+1, 2500000+1):
         records = train_once(n0, n1, i, activation, init='random')
         if i % 1000 == 0:
             records.save('records/train/value_network/')
-        if i % 10000 == 0:
-            n0.save_model('model/value_network/value_network_random_%05dw.model' % (i // 10000))
-    for i in range(2000000, 4000000 + 1):
-        records = train_once(n0, n1, i, init='fixed')
+        if i % 1000 == 0:
+            n0.save_model('model/value_network/value_network_random_%05dw.model' % (np.ceil(i / 10000)))
+    n0._epsilon = n1._epsilon = 1
+    for i in range(2500000+1, 4000000 + 1):
+        records = train_once(n0, n1, i, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:
             records.save('records/train/value_network/1st_')
         if i % 1000 == 0:
-            n0.save_model('model/value_network/value_network_fixed_%05dw.model' % (i // 10000))
+            n0.save_model('model/value_network/value_network_fixed_%05dw.model' % (np.ceil(i / 10000)))
 
 
 if __name__ == '__main__':
