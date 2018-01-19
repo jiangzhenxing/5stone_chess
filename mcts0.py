@@ -1,15 +1,16 @@
 import numpy as np
 import time
+import os
+import chess_rule as rule
+import util
+import logging
+import sys
 from threading import Thread,Event
 from multiprocessing import Process,Pipe
 from queue import Queue
 from policy_network import PolicyNetwork
 from qlearning_network import DQN
 from value_network import ValueNetwork
-import chess_rule as rule
-import util
-import logging
-import sys
 
 logger = logging.getLogger('train')
 logger_tree = logging.getLogger('tree')
@@ -452,6 +453,8 @@ class SimulateProcess:
 
     def _start(self):
         logger.info('start...')
+        np.random.seed(os.getpid())
+        logger.info('random:%s', [np.random.random() for _ in range(3)])
         value_model = ValueNetwork(output_activation='sigmoid')
         for i in range(self.begin, 2 ** 32):
             logger.info('simulate %s', i)
@@ -467,8 +470,8 @@ class SimulateProcess:
             if records.length() == 0:
                 continue
             self.record_queue.put(records)
-            if i % 1000 == 0:
-                records.save('records/train/alpha0/1st_')
+            if i % 100 == 0:
+                records.save('records/train/alpha0/1st_%03d_' % (i//100))
 
     def epsilon_greedy(self, board, player, valid_action, ts):
         """
