@@ -20,7 +20,7 @@ class ValueNetwork:
     """
     v = 1 if win else 0
     """
-    def __init__(self, epsilon=1.0, epsilon_decay=0.25, output_activation='sigmoid', filepath=None):
+    def __init__(self, epsilon=1.0, epsilon_decay=1e-5, output_activation='sigmoid', filepath=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
@@ -230,7 +230,7 @@ class ValueNetwork:
         return q2
 
     def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * (1 + self.episode))
 
     @staticmethod
     def random_choice(a):
@@ -280,7 +280,7 @@ def simulate(nw0, nw1, activation, init='fixed'):
             else:
                 raise ValueError
             if command == rule.WIN:
-                logging.info('%s WIN, step use: %s, epsilon:%s', str(player), records.length(), nw.epsilon)
+                logging.info('%s WIN, stone:%s, step use: %s, epsilon:%s', str(player), (board==player).sum(), records.length(), nw.epsilon)
                 return records, player
             if records.length() > 10000:
                 logging.info('走子数过多: %s', records.length())

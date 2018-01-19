@@ -22,24 +22,27 @@ class DQN(ValueNetwork):
     def load_model(model_file):
         logger.info('load model in DQN')
         model = load_model(model_file)
+        out = model.get_layer(index=-1)
+        l = 0.1
+        out.kernel_regularizer = l2(l)
+        out.bias_regularizer = l2(l)
+
         for l in model.layers:
             if hasattr(l, 'kernel_regularizer'):
-                print(l.kernel_regularizer)
+                print('kernel_regularizer:', l.kernel_regularizer)
                 if l.kernel_regularizer:
                     print(l.kernel_regularizer.get_config())
-        print(model.optimizer.get_config())
+        print('optimizer:', model.optimizer.get_config())
         '''
         # 这里中途修改了一下输出层的正则化参数和SGD的学习率
         for layer in model.layers:
             l = 0.000001
             layer.kernel_regularizer = None
             layer.bias_regularizer = None
-        out = model.get_layer(index=-1)
-        l = 0.001
-        out.kernel_regularizer = l2(l)
-        out.bias_regularizer = l2(l)
-        model.optimizer = SGD(lr=1e-4, decay=1e-6)
         '''
+
+        # model.optimizer = SGD(lr=1e-4, decay=1e-6)
+
         return model
 
     def create_model(self):
@@ -155,11 +158,11 @@ def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
     activation = 'sigmoid'     # linear, selu, sigmoid
-    n0 = DQN(epsilon=1, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model')
-    n1 = DQN(epsilon=1, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00576w.model')
+    n0 = DQN(epsilon=0, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00581w.model')
+    n1 = DQN(epsilon=0, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00581w.model')
     n1.copy(n0)
     episode = 1000000
-    begin = 5760000
+    begin = 5810000
     '''
     for i in range(begin, begin+episode+1):
         train_once(n0, n1, i, activation, init='random')
@@ -167,7 +170,7 @@ def train():
             n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, np.ceil(i / 10000)))
     '''
     for i in range(begin+1, begin + episode + 1):
-        records = train_once(n0, n1, i, activation, init='fixed')
+        records = train_once(n0, n1, i, activation, init='fixed', copy_period=5)
         if i % 1000 == 0:
             records.save('records/train/qlearning_network/1st_')
         if i % 1000 == 0:

@@ -172,12 +172,13 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, max_search=500, max_search_time=300, min_search_time=15):
+    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=1.0, min_search=500, max_search=10000, min_search_time=15, max_search_time=300):
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
-        self.max_search = max_search            # 最大的搜索次数
-        self.max_search_time = max_search_time  # 最大的搜索时间(s)
-        self.min_search_time = min_search_time
+        self.min_search = min_search            # 最小的搜索次数
+        self.max_search = max_search            # 最大的搜索次数(超过即停止搜索)
+        self.max_search_time = max_search_time  # 最大搜索时间(s)(超过即停止搜索)
+        self.min_search_time = min_search_time  # 最小搜索时间(s)(同时满足最小搜索次数和最小搜索时间时，停止搜索)
         self.searching = False
         self.stop = False
         self.stop_event = Event()
@@ -192,14 +193,16 @@ class MCTS:
         self.predicted = set()  # 树中已经走过的走法 (board_str, player, action)
         self.root.expansion()
 
-    def search(self, max_search=0, max_search_time=0):
+    def search(self, min_search=0, max_search=0, min_search_time=0, max_search_time=0):
         logger.info('begin search...')
         self.searching = True
+        if min_search == 0: min_search = self.min_search
         if max_search == 0: max_search = self.max_search
+        if min_search_time == 0: min_search_time = self.min_search_time
         if max_search_time == 0: max_search_time = self.max_search_time
         start_time = time.time()
-        while not self.stop and time.time()-start_time < max_search_time:
-            if time.time()-start_time > self.min_search_time and self.n_search > max_search:
+        while not self.stop and self.n_search < max_search and time.time()-start_time < max_search_time:
+            if self.n_search > min_search and time.time()-start_time > min_search_time:
                 break
             self.value.predicts.update(self.predicted)
             walked = self.predicted.copy()
@@ -207,13 +210,16 @@ class MCTS:
             self.n_search += 1
             self.value.clear()
             self.value.episode += 1
-            logger.info('search %s', self.n_search)
+            logger.debug('search %s', self.n_search)
         logger.info('search over %s', self.n_search)
         self.n_search = 0
         self.show_info()
         self.searching = False
         if self.stop:
             self.stop_event.set()
+
+    def search_forever(self):
+        self.search(min_search=2**32, max_search=2**32, min_search_time=2**32, max_search_time=2**32)
 
     def stop_search(self):
         if not self.searching:
@@ -336,13 +342,13 @@ class MCTSWorker:
                     self.ts.move_down(self.ts.root.board, self.ts.root.player, a)
                     opp_q = [(e.a, e.q()) for e in self.ts.root.sub_edge]
                     self.predict_callback(a, q, opp_q)
-                    self.ts.search(max_search=2 ** 32, max_search_time=2 ** 32)
+                    self.ts.search_forever()
             elif command == COMMAND.MOVE_DOWN:
                 # 对手走棋，向下移动树
                 logger.info('move down...')
                 self.ts.move_down(board, player, action)
             elif command == COMMAND.SEARCH:
-                self.ts.search(max_search=2**32, max_search_time=2**32)
+                self.ts.search_forever()
         logger.info('...MCTS WORKER ENDED...')
 
     def send(self, command, board=None, player=None, action=None):
@@ -431,7 +437,7 @@ class MCTSProcess:
 
 
 class SimulateProcess:
-    def __init__(self, record_queue, model_queue, weight_lock, weights_file, init_board='random', epsilon=1.0, epsilon_decay=0.25, begin=0):
+    def __init__(self, record_queue, model_queue, weight_lock, weights_file, init_board='random', epsilon=1.0, epsilon_decay=2e-3, begin=0):
         self.record_queue = record_queue
         self.model_queue = model_queue
         self.weight_lock = weight_lock
@@ -481,7 +487,7 @@ class SimulateProcess:
 
     def simulate(self, ts, board, player):
         from record import Record
-        from qlearning_network import NoActionException
+        from value_network import NoActionException
         records = Record()
         while True:
             try:
@@ -524,7 +530,7 @@ class SimulateProcess:
             board = rule.flip_board(board)
 
     def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * (1 + self.episode))
 
     def start(self):
         Process(target=self._start).start()
@@ -537,19 +543,20 @@ def train():
     model_queue = Queue()
     weight_lock = Lock()
     weights_file = 'model/alpha0/weights'
-    begin = 2000
-    value_model = ValueNetwork(output_activation='sigmoid', filepath='model/alpha0/value_network_00020h.model')
+    begin = 6100
+    value_model = ValueNetwork(output_activation='sigmoid', filepath='model/alpha0/value_network_00061h.model')
+
     if os.path.exists(weights_file):
         value_model.model.load_weights(weights_file)
     else:
         value_model.model.save_weights(weights_file)
+
     for _ in range(3):
-        SimulateProcess(record_queue, model_queue, weight_lock, weights_file, epsilon=1.0, epsilon_decay=0.25, begin=begin).start()
+        SimulateProcess(record_queue, model_queue, weight_lock, weights_file, init_board='random', epsilon=1.0, epsilon_decay=2e-3, begin=begin).start()
 
     for i in range(begin+1, 2 ** 32):
-        logger.info('.......... train %s ..............', i)
         records = record_queue.get()
-        logger.info('records: %s', len(records))
+        logger.info('train %s, records:%s', i, len(records))
         value_model.train(records, epochs=5)
         with weight_lock:
             value_model.model.save_weights(weights_file)
