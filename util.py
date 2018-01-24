@@ -1,7 +1,8 @@
 import time
 import numpy as np
 import logging
-
+import os
+import threading
 
 print_time_flag = True
 print_time_func = set() # update_qtable
@@ -54,8 +55,18 @@ def choose_max_random(a):
     idx = np.argwhere(a == a.max())
     return tuple(random_choice(idx))
 
-models = {}
+def rand_int():
+    return int(time.time() * 1000 * os.getpid() + id(threading.current_thread()))
+
+def rand_int32():
+    return rand_int() & (2 ** 32 - 1)
+
+LOCAL = threading.local()
 def load_model(filepath):
+    if not hasattr(LOCAL, 'models'):
+        LOCAL.models = {}
+    models = LOCAL.models
+
     if filepath in models:
         return models[filepath]
     else:

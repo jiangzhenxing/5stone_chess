@@ -73,9 +73,9 @@ class ChessBoard:
         player_var = tk.StringVar()
         player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
                           ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
-                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_fixed_sigmoid_555_00582w.model'}),   # DQN_fixed_sigmoid_00029w.model
-                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_sigmoid_00136w.model'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/qlearning_network/DQN_fixed_sigmoid_00029w.model'}),]
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/qlearning_network/DQN_fixed_sigmoid_555_00605w.model'}),   # DQN_fixed_sigmoid_00029w.model
+                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/value_network/value_network_random_00227w.model'}),
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/qlearning_network/DQN_fixed_sigmoid_555_00605w.model'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
@@ -229,13 +229,12 @@ class ChessBoard:
         logger.debug('valid_action:\n%s', valid_action)
         self.show_qtext(p, valid_action)
         self.show_select(from_, to_)
-        if opp_q is not None:
-            rule.move(board, from_, to_)
-            valid = rule.valid_action(board, -player)
-            self.show_qtext(opp_q, valid, hide=False)
         stone = self.stone(from_)
         def play_later():
             result = self.move_to(stone, to_)
+            if opp_q is not None:
+                opp_valid = rule.valid_action(self.board(), -player)
+                self.show_qtext(opp_q, opp_valid, hide=False)
             if result == rule.ACCQUIRE:
                 # 对手走棋
                 self.switch_player_and_play()

@@ -8,6 +8,7 @@ import chess_rule as rule
 from util import add_print_time_fun, print_use_time
 from record import Record
 import logging
+import util
 
 logger = logging.getLogger('train')
 
@@ -20,12 +21,14 @@ class ValueNetwork:
     """
     v = 1 if win else 0
     """
-    def __init__(self, epsilon=1.0, epsilon_decay=1e-5, output_activation='sigmoid', filepath=None):
+    def __init__(self, epsilon=1.0, epsilon_decay=1e-5, hidden_activation='selu', output_activation='sigmoid', lr=1e-3, model=None, filepath=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
         self.epsilon_decay = epsilon_decay
+        self.hidden_activation = hidden_activation
         self.output_activation = output_activation
+        self.lr = lr
         self.model_file = filepath
         self.predicts = set()
         # 跟踪上一步的值，供调试
@@ -33,32 +36,58 @@ class ValueNetwork:
         self.valid = None
         self.vq = None
         self.episode = 0 # 第几次训练
-        self.model = self.load_model(filepath) if filepath else self.create_model()
+        if model:
+            self.model = model
+        else:
+            self.model = self.load_model(filepath) if filepath else self.create_model()
 
     @staticmethod
     def load_model(model_file):
         logger.info('load model in ValueNetwork')
-        return load_model(model_file)
+        model = load_model(model_file)
+        '''
+        # 这里中途修改了一下输出层的正则化参数和SGD的学习率
+        l = 1e-6
+        for layer in model.layers:
+            layer.kernel_regularizer = l2(l)
+            layer.bias_regularizer = l2(l)
+        '''
+        l = 0.01
+        out = model.get_layer(index=-1)
+        out.kernel_regularizer = l2(l)
+        out.bias_regularizer = l2(l)
+
+        for l in model.layers:
+            if hasattr(l, 'kernel_regularizer'):
+                print('kernel_regularizer:', l.kernel_regularizer)
+                if l.kernel_regularizer:
+                    print(l.kernel_regularizer.get_config())
+
+        # model.optimizer = SGD(lr=1e-4, decay=1e-6)
+        print('optimizer:', model.optimizer.get_config())
+
+        return model
 
     def create_model(self):
+        l = 1e-3
+
         def identity_block(x, nb_filter, kernel_size=3):
             k1, k2, k3 = nb_filter
-            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='selu')(x)
-            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='selu')(y)
-            y = Convolution2D(filters=k3, kernel_size=1, strides=1)(y)
+            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation=self.hidden_activation, kernel_regularizer=l2(l), bias_regularizer=l2(l))(x)
+            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation=self.hidden_activation, kernel_regularizer=l2(l), bias_regularizer=l2(l))(y)
+            y = Convolution2D(filters=k3, kernel_size=1, strides=1, kernel_regularizer=l2(l), bias_regularizer=l2(l))(y)
             y = add([x,y])
-            return Activation('selu')(y)
+            return Activation(self.hidden_activation)(y)
 
         def conv_block(x, nb_filter, kernel_size=3):
             k1, k2, k3 = nb_filter
-            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation='selu')(x)
-            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation='selu')(y)
-            y = Convolution2D(filters=k3, kernel_size=1, strides=1)(y)
-            x = Convolution2D(filters=k3, kernel_size=1, strides=1)(x)
+            y = Convolution2D(filters=k1, kernel_size=1, strides=1, activation=self.hidden_activation, kernel_regularizer=l2(l), bias_regularizer=l2(l))(x)
+            y = Convolution2D(filters=k2, kernel_size=kernel_size, strides=1, padding='same', activation=self.hidden_activation, kernel_regularizer=l2(l), bias_regularizer=l2(l))(y)
+            y = Convolution2D(filters=k3, kernel_size=1, strides=1, kernel_regularizer=l2(l), bias_regularizer=l2(l))(y)
+            x = Convolution2D(filters=k3, kernel_size=1, strides=1, kernel_regularizer=l2(l), bias_regularizer=l2(l))(x)
             y = add([x,y])
-            return Activation('selu')(y)
+            return Activation(self.hidden_activation)(y)
 
-        l = 1e-3
         # 输入层
         input_ = Input(shape=(5,5,5))
 
@@ -69,7 +98,9 @@ class ValueNetwork:
             input_shape=(5,5,5),  # 输入平面的形状
             strides=1,          # 步长
             padding='same',     # padding方式 same:保持图大小不变/valid
-            activation='selu',  # 激活函数
+            activation=self.hidden_activation,  # 激活函数
+            kernel_regularizer=l2(l),
+            bias_regularizer=l2(l)
         )(input_)
 
         out = identity_block(out, (100,100,100))
@@ -85,27 +116,19 @@ class ValueNetwork:
         out = Flatten()(out)
         # out = Dense(units=100, activation='relu')(out)
 
+        l = 1e-3
         # 输出价值
-        if self.output_activation == 'linear':
-            out = Dense(units=1,
-                        activation='linear',
-                        kernel_initializer='zeros',
-                        kernel_regularizer=l2(l),
-                        bias_initializer='zeros',
-                        bias_regularizer=l2(l)
-                        )(out)
-        elif self.output_activation == 'sigmoid':
-            out = Dense(units=1,
-                        activation='sigmoid',
-                        kernel_initializer='zeros',
-                        kernel_regularizer=l2(l),
-                        bias_initializer='zeros',
-                        bias_regularizer=l2(l)
-                        )(out)
+        out = Dense(units=1,
+                    activation=self.output_activation,
+                    kernel_initializer='zeros',
+                    kernel_regularizer=l2(l),
+                    bias_initializer='zeros',
+                    bias_regularizer=l2(l)
+                    )(out)
         model = Model(inputs=input_, outputs=out)
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD(lr=1e-3)
+        opt = SGD(lr=self.lr, decay=1e-6)
         # loss function
         loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
@@ -203,6 +226,7 @@ class ValueNetwork:
                     q.pop(idx)
 
     def train(self, records, batch_size=1, epochs=1, verbose=0):
+        logger.info('train: %s', len(records))
         x_train = []
         y_train = []
         for bd, from_, action, reward, _ in records:
@@ -238,7 +262,7 @@ class ValueNetwork:
 
     @staticmethod
     def load(modelfile, epsilon=0.3):
-        return ValueNetwork(epsilon=epsilon, filepath=modelfile)
+        return ValueNetwork(epsilon=epsilon, model=util.load_model(modelfile))
 
     def set_pre(self, q, valid, vq):
         self.q_value = q
@@ -257,6 +281,7 @@ class ValueNetwork:
 
 # @print_use_time()
 def simulate(nw0, nw1, activation, init='fixed'):
+    np.random.seed(util.rand_int32())
     player = 1 if np.random.random() > 0.5 else -1
     logger.info('init:%s, player:%s', init, player)
     board = rule.init_board(player) if init == 'fixed' else rule.random_init_board()
@@ -324,12 +349,16 @@ def train_once(n0, n1, i, activation, init='random', copy_period=1):
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
+    hidden_activation = 'relu'
     activation = 'sigmoid' # linear, sigmoid
-    n0 = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_random_00199w.model')
-    n1 = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_random_00199w.model')
-    n1.copy(n0)
+    n_ = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_random_00226w.model')
+    n0 = ValueNetwork(epsilon=0, output_activation=activation, hidden_activation=hidden_activation)
+    n1 = ValueNetwork(epsilon=0, output_activation=activation, hidden_activation=hidden_activation)
+    n0.copy(n_)
+    n1.copy(n_)
+
     episode = 10000000
-    begin = 1990000
+    begin = 2260000
     for i in range(begin+1, 2500000+1):
         records = train_once(n0, n1, i, activation, init='random')
         if i % 1000 == 0:

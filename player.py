@@ -134,9 +134,9 @@ class DQNPlayer(ComputerPlayer):
         logger.info('%s play...', self.name)
         board_self = rule.flip_board(board) if self.stone_val == -1 else board.copy()
         (from_, action), (valid, q) = self.model.predict(board_self, self.stone_val)
-        logger.info('valid is:%s', valid)
-        logger.info('q is:%s', q)
-        logger.info('from:%s, action:%s', from_, action)
+        logger.debug('valid is:%s', valid)
+        logger.debug('q is:%s', q)
+        logger.debug('from:%s, action:%s', from_, action)
         to_ = tuple(np.add(from_, rule.actions_move[action]))
         q_table = np.zeros((5,5,4))
         for (f, a),q1 in zip(valid,q):

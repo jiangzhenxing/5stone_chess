@@ -22,8 +22,15 @@ class DQN(ValueNetwork):
     def load_model(model_file):
         logger.info('load model in DQN')
         model = load_model(model_file)
+
+        # 这里中途修改了一下输出层的正则化参数和SGD的学习率
+        l = 1e-3
+        for layer in model.layers:
+            layer.kernel_regularizer = l2(l)
+            layer.bias_regularizer = l2(l)
+
+        l = 0.001
         out = model.get_layer(index=-1)
-        l = 0.1
         out.kernel_regularizer = l2(l)
         out.bias_regularizer = l2(l)
 
@@ -32,23 +39,16 @@ class DQN(ValueNetwork):
                 print('kernel_regularizer:', l.kernel_regularizer)
                 if l.kernel_regularizer:
                     print(l.kernel_regularizer.get_config())
-        print('optimizer:', model.optimizer.get_config())
-        '''
-        # 这里中途修改了一下输出层的正则化参数和SGD的学习率
-        for layer in model.layers:
-            l = 0.000001
-            layer.kernel_regularizer = None
-            layer.bias_regularizer = None
-        '''
 
-        # model.optimizer = SGD(lr=1e-4, decay=1e-6)
+        model.optimizer = SGD(lr=1e-3, decay=1e-5)
+        print('optimizer:', model.optimizer.get_config())
 
         return model
 
     def create_model(self):
         # 定义顺序模型
         model = Sequential()
-        l = 0.01
+        l = 1e-3
         # 第一个卷积层
         model.add(Convolution2D(
             filters=100,        # 卷积核/滤波器个数
@@ -56,9 +56,9 @@ class DQN(ValueNetwork):
             input_shape=(5,5,10),  # 输入平面的形状
             strides=1,          # 步长
             padding='same',     # padding方式 same:保持图大小不变/valid
-            activation='relu',  # 激活函数
-            # kernel_regularizer=l2(l),
-            # bias_regularizer=l2(l)
+            activation=self.hidden_activation,  # 激活函数
+            kernel_regularizer=l2(l),
+            bias_regularizer=l2(l)
         ))
 
         def create_conv_layer(filters=50, kernel_size=3):
@@ -66,7 +66,9 @@ class DQN(ValueNetwork):
                                  kernel_size=kernel_size,
                                  strides=1,
                                  padding='same',
-                                 activation='relu',
+                                 activation=self.hidden_activation,
+                                 kernel_regularizer=l2(l),
+                                 bias_regularizer=l2(l)
                                  )
         # 第二个卷积层
         model.add(create_conv_layer())
@@ -80,37 +82,22 @@ class DQN(ValueNetwork):
         model.add(Flatten())
         # 全连接层
         model.add(Dense(units=100,
-                        activation='relu',
+                        activation=self.hidden_activation,
+                        kernel_regularizer=l2(l),
+                        bias_regularizer=l2(l)
                         ))
+        l = 0.01
         # 输出Q值
-        if self.output_activation == 'linear':
-            model.add(Dense(units=1,
-                            activation='linear',
-                            kernel_initializer='zeros',
-                            kernel_regularizer=l2(l),
-                            bias_initializer='zeros',
-                            bias_regularizer=l2(l)
-                            ))
-        elif self.output_activation == 'sigmoid':
-            model.add(Dense(units=1,
-                            activation='sigmoid',
-                            kernel_initializer='zeros',
-                            kernel_regularizer=l2(l),
-                            bias_initializer='zeros',
-                            bias_regularizer=l2(l)
-                            ))
-        elif self.output_activation == 'selu':
-            model.add(Dense(units=1,
-                            activation='selu',
-                            kernel_initializer='zeros',
-                            kernel_regularizer=l2(l),
-                            bias_initializer='zeros',
-                            bias_regularizer=l2(l)
-                            ))
+        model.add(Dense(units=1,
+                        activation='sigmoid',
+                        kernel_initializer='zeros',
+                        kernel_regularizer=l2(l),
+                        bias_initializer='zeros',
+                        bias_regularizer=l2(l)
+                        ))
         # 定义优化器
         # opt = Adam(lr=1e-4)
-        opt = SGD(lr=2e-4, decay=1e-6)
-        opt.lr.value()
+        opt = SGD(lr=self.lr, decay=1e-5)
         # loss function
         loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
@@ -151,26 +138,31 @@ class DQN(ValueNetwork):
 
     @staticmethod
     def load(modelfile, epsilon=0.3):
-        return DQN(epsilon=epsilon, filepath=modelfile)
+        return DQN(epsilon=epsilon, model=util.load_model(modelfile))
 
 
 def train():
     logging.info('...begin...')
     add_print_time_fun(['simulate', 'train_once'])
+    hidden_activation = 'relu'
     activation = 'sigmoid'     # linear, selu, sigmoid
-    n0 = DQN(epsilon=0, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00581w.model')
-    n1 = DQN(epsilon=0, epsilon_decay=0.25, output_activation=activation, filepath='model/qlearning_network/DQN_fixed_sigmoid_555_00581w.model')
-    n1.copy(n0)
-    episode = 1000000
-    begin = 5810000
+    model_file = 'model/qlearning_network/DQN_random_sigmoid_00600w.model'
+    n_ = DQN(epsilon=0.3, epsilon_decay=3e-5, output_activation=activation, filepath=model_file)
+    n0 = DQN(epsilon=0.3, epsilon_decay=3e-5, output_activation=activation, hidden_activation=hidden_activation)
+    n1 = DQN(epsilon=0.3, epsilon_decay=3e-5, output_activation=activation, hidden_activation=hidden_activation)
+    n0.copy(n_)
+    n1.copy(n_)
+    episode = 100000
+    begin = 6000000
+
     '''
     for i in range(begin, begin+episode+1):
         train_once(n0, n1, i, activation, init='random')
-        if i % 10000 == 0:
+        if i % 1000 == 0:
             n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, np.ceil(i / 10000)))
     '''
-    for i in range(begin+1, begin + episode + 1):
-        records = train_once(n0, n1, i, activation, init='fixed', copy_period=5)
+    for i in range(begin+1, begin + episode*10 + 1):
+        records = train_once(n0, n1, i-begin, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:
             records.save('records/train/qlearning_network/1st_')
         if i % 1000 == 0:
