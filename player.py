@@ -204,6 +204,12 @@ class MCTSPlayer(ComputerPlayer):
         Thread(target=_play).start()
 
     def opponent_play(self, board, from_, to_):
+        """
+        对手走的棋
+        :param board:   对手走棋之前的局面
+        :param from_:
+        :param to_:
+        """
         player = board[from_]
         assert player == -self.stone_val, str(board) + '\nfrom:' + str(from_) + ' to:' + str(to_)
         act = tuple(np.subtract(to_, from_))

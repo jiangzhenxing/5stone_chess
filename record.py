@@ -114,12 +114,19 @@ class Record:
         """
         只有赢/输的奖励(1/0)
         """
-        self.records.append([board, from_, action, reward, vp])
+        self.records.append([board, from_, action, 0.5, vp])
         if win:
             winner = board[from_]
             self.winner = winner
             for rc in self.records:
                 rc[3] = 1 if rc[0][rc[1]]==winner else 0
+
+    def draw(self):
+        """
+        和棋
+        """
+        for rec in self.records:
+            rec[3] = 0.5
 
     def save(self, path_pre):
         """
@@ -164,6 +171,9 @@ class Record:
 
     def __getitem__(self, item):
         return self.records[item]
+
+    def __reversed__(self):
+        return reversed(self.records)
 
     def length(self):
         return len(self.records)

@@ -36,6 +36,16 @@ def random_choice(a):
     """
     return a[np.random.randint(len(a))]
 
+def select_by_prob(actions, probs):
+    # logging.debug(actions)
+    # logging.debug(probs)
+    rd = np.random.rand()
+    s = 0
+    for a,p in zip(actions, probs):
+        s += p
+        if s > rd:
+            return a
+
 def board_str(board):
     return ''.join(map(str, board.flatten()))
 

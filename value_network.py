@@ -202,6 +202,26 @@ class ValueNetwork:
         return self.pi_star(valid, q),(valid,q)
 
     def policy(self, board, player):
+        return self.policy_by_probs(board, player)
+        # return self.policy_by_epsilon_greedy(board, player)
+
+    def policy_by_epsilon_greedy(self, board, player):
+        valid = rule.valid_actions(board, player)
+        q = None
+        self.set_pre(q, valid, q)
+        if len(valid) == 0:
+            raise NoActionException
+        board_str = ''.join(map(str, board.flatten()))
+        (from_,action),q = self.epsilon_greedy(board, valid, q)
+        self.predicts.add((board_str,from_,action))
+        self.set_pre(q, valid, None)
+        if self.episode % 10 == 0:
+            logger.info('action:%s,%s', from_, action)
+            # logger.info('valid:%s', valid)
+            logger.info('q:%s', q)
+        return from_,action
+
+    def policy_by_epsilon_greedy_no_repeat(self, board, player):
         valid = rule.valid_actions(board, player)
         q = None
         self.set_pre(q, valid, q)
@@ -225,8 +245,22 @@ class ValueNetwork:
                 if q:
                     q.pop(idx)
 
+    def policy_by_probs(self, board, player):
+        valid = rule.valid_actions(board, player)
+        q = None
+        self.set_pre(q, valid, q)
+        if len(valid) == 0:
+            raise NoActionException
+        qs = [self.q(board, from_, act) for from_, act in valid]
+        probs = self.value_to_probs(qs)
+        action = util.select_by_prob(valid, probs)
+        if self.episode % 10 == 0:
+            logger.info('action:%s', action)
+            logger.info('q:%s', qs)
+            logger.info('probs:%s', probs)
+        return action
+
     def train(self, records, batch_size=1, epochs=1, verbose=0):
-        logger.info('train: %s', len(records))
         x_train = []
         y_train = []
         for bd, from_, action, reward, _ in records:
@@ -286,11 +320,37 @@ def simulate(nw0, nw1, activation, init='fixed'):
     logger.info('init:%s, player:%s', init, player)
     board = rule.init_board(player) if init == 'fixed' else rule.random_init_board()
     records = Record()
+    boards = set()      # {(board,player)}
     nws = [None, nw0, nw1]
+    n_steps = 0
     while True:
         nw = nws[player] # nw0 if player == 1 else nw1
         try:
             bd = board.copy()
+            board_str = util.board_str(board)
+
+            if (board_str,player) in boards:
+                # 找出环，并将目标置为0.5进行训练，然后将环清除
+                finded = False
+                records2 = Record()
+                for i in range(len(records) - 1, -1, -1):
+                    b, f, a, _, _ = records[i]
+                    if (b == board).all() and b[f] == player:
+                        finded = True
+                        break
+                assert finded, (board, player)
+                records2.records = records.records[i:]
+                records2.draw()
+                nw0.train(records2)
+                nw1.train(records2)
+
+                # 将环里的数据清除
+                records.records = records.records[:i]
+                for b, f, a, _, _ in records2:
+                    boards.remove((util.board_str(b), b[f]))
+                logger.info('环:%s, records:%s, epsilon:%s', len(records2), records.length(), nw.epsilon)
+            boards.add((board_str,player))
+
             from_, action = nw.policy(board, player)
             assert board[from_] == player
             to_ = tuple(np.add(from_, rule.actions_move[action]))
@@ -307,12 +367,16 @@ def simulate(nw0, nw1, activation, init='fixed'):
             if command == rule.WIN:
                 logging.info('%s WIN, stone:%s, step use: %s, epsilon:%s', str(player), (board==player).sum(), records.length(), nw.epsilon)
                 return records, player
-            if records.length() > 10000:
+            if n_steps > 3000:
                 logging.info('走子数过多: %s', records.length())
-                return Record(), 0
+                # 走子数过多，和棋
+                records.draw()
+                return records, 0
+
             player = -player
             if init == 'fixed':
                 board = rule.flip_board(board)
+            n_steps += 1
         except NoActionException:
             # 随机初始化局面后一方无路可走
             return Record(),0
@@ -351,22 +415,24 @@ def train():
     add_print_time_fun(['simulate', 'train_once'])
     hidden_activation = 'relu'
     activation = 'sigmoid' # linear, sigmoid
-    n_ = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_random_00226w.model')
+    begin = 2610000
+    n_ = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_fixed_%05dw.model' % np.ceil(begin / 10000))
     n0 = ValueNetwork(epsilon=0, output_activation=activation, hidden_activation=hidden_activation)
     n1 = ValueNetwork(epsilon=0, output_activation=activation, hidden_activation=hidden_activation)
     n0.copy(n_)
     n1.copy(n_)
 
-    episode = 10000000
-    begin = 2260000
-    for i in range(begin+1, 2500000+1):
+    episode = 100000
+    '''
+    for i in range(begin+1, begin+episode+1):
         records = train_once(n0, n1, i, activation, init='random')
         if i % 1000 == 0:
             records.save('records/train/value_network/')
         if i % 1000 == 0:
             n0.save_model('model/value_network/value_network_random_%05dw.model' % (np.ceil(i / 10000)))
-    n0._epsilon = n1._epsilon = 1
-    for i in range(2500000+1, 4000000 + 1):
+    '''
+    # n0._epsilon = n1._epsilon = 1
+    for i in range(begin+1, 4000000 + 1):
         records = train_once(n0, n1, i, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:
             records.save('records/train/value_network/1st_')

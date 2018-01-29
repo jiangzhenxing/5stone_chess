@@ -104,6 +104,9 @@ class DQN(ValueNetwork):
 
         return model
 
+    def policy(self, board, player):
+        return self.policy_by_epsilon_greedy(board, player)
+
     @staticmethod
     def feature(board, from_, action):
         """
@@ -146,14 +149,14 @@ def train():
     add_print_time_fun(['simulate', 'train_once'])
     hidden_activation = 'relu'
     activation = 'sigmoid'     # linear, selu, sigmoid
-    model_file = 'model/qlearning_network/DQN_random_sigmoid_00600w.model'
-    n_ = DQN(epsilon=0.3, epsilon_decay=3e-5, output_activation=activation, filepath=model_file)
-    n0 = DQN(epsilon=0.3, epsilon_decay=3e-5, output_activation=activation, hidden_activation=hidden_activation)
-    n1 = DQN(epsilon=0.3, epsilon_decay=3e-5, output_activation=activation, hidden_activation=hidden_activation)
+    begin = 6300000
+    model_file = 'model/qlearning_network/DQN_fixed_sigmoid_555_%05dw.model' % np.ceil(begin / 10000)
+    n_ = DQN(epsilon=0.5, epsilon_decay=1e-5, output_activation=activation, filepath=model_file)
+    n0 = DQN(epsilon=0.5, epsilon_decay=1e-5, output_activation=activation, hidden_activation=hidden_activation)
+    n1 = DQN(epsilon=0.5, epsilon_decay=1e-5, output_activation=activation, hidden_activation=hidden_activation)
     n0.copy(n_)
     n1.copy(n_)
     episode = 100000
-    begin = 6000000
 
     '''
     for i in range(begin, begin+episode+1):
@@ -162,7 +165,7 @@ def train():
             n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, np.ceil(i / 10000)))
     '''
     for i in range(begin+1, begin + episode*10 + 1):
-        records = train_once(n0, n1, i-begin, activation, init='fixed', copy_period=1)
+        records = train_once(n0, n1, i-6000000, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:
             records.save('records/train/qlearning_network/1st_')
         if i % 1000 == 0:
