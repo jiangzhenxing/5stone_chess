@@ -93,8 +93,10 @@ def load_model(filepath):
 def show_model(model, columns=('input_shape','output_shape','params','kernel_regularizer')):
     idx = 1
     rows = []
+    total_params = 0
     for l in model.layers:
         # config = l.get_config()
+        total_params += l.count_params()
         values = [idx, type(l).__name__]
         for col in columns:
             if col == 'params':
@@ -142,4 +144,5 @@ def show_model(model, columns=('input_shape','output_shape','params','kernel_reg
 
     opt_config = model.optimizer.get_config()
     print('optimizer: lr:%g, decay:%g, momentum:%g, nesterov:%s' % (opt_config['lr'], opt_config['decay'], opt_config['momentum'], opt_config['nesterov'],))
+    print('total params: {:,}'.format(total_params))
     print('-' * width)
