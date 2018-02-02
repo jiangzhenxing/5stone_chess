@@ -51,21 +51,22 @@ class Node:
 
     def search(self, walked):
         dis = 1
+        q = 0
         if self.final:
-            value = 0   # -0.0005
-            q = 0
+            value = 0
+            # q = 0
             player = self.player
         elif not self.expanded:
             self.expansion()
             e = self.selection(walked)
             value = e.v
-            q = e.q_
+            # q = e.q_
             player = self.player
             logger.debug('level:%s, value:%s, _q, player:%s', self.level, value, q, player)
         elif self.level > 1000:
             e = self.selection(walked)
             value = e.v
-            q = e.q_
+            # q = e.q_
             player = self.player
         else:
             e = self.selection(walked)
@@ -76,10 +77,27 @@ class Node:
 
     def selection(self, walked):
         """
+        对于树选手：
+        返回Q值最大的一条边
+        对于模拟走棋的对手：
+        以epsilon的概率选择之前走的走法
+        1-epsilon的概率选Q值最大的走法
+        """
+        if self.player == self.tree.player:
+            # 选Q值最大的走法
+            return self.selection_by_Q(walked)
+        else:
+            # 以epsilon的概率选择之前走的走法
+            # 1-epsilon的概率选Q值最大的走法
+            return self.selection_epsilon(walked)
+
+    def selection_by_Q(self, walked):
+        """
         返加Q值最大且之前未走过的一条边
         """
         edges = self.sub_edge.copy()
         me = max(edges, key=lambda e:e.q())
+        '''
         while me.v > 0.5 and len(edges) > 1 and (self.board_str, *me.a) in walked:
             edges.remove(me)
             me_ = max(edges, key=lambda e:e.q())
@@ -87,7 +105,26 @@ class Node:
                 me = me_
             else:
                 break
+        '''
         return me
+
+    def selection_epsilon(self, walked):
+        """
+        以epsilon的概率选择之前走的边
+        1-epsilon的概率选Q值最大的边
+        """
+        if self.board_str in self.tree.opp_actions:
+            actions = self.tree.opp_actions[self.board_str]  # {action:n}
+            epsilon = 0.7
+            if np.random.random() < epsilon:
+                a, n = zip(*actions.items())
+                p = util.softmax(n)
+                a = util.select_by_prob(a, p)
+                for e in self.sub_edge:
+                    if e.a == a:
+                        return e
+                raise ValueError(a) # 如果没找到就是不正常的
+        return self.selection_by_Q(walked)
 
     def policy(self):
         pass
@@ -127,7 +164,7 @@ class Node:
                 # 更新价值
                 pe.v = pe.v + (value - pe.v) / pe.n_update
                 # 更新Q值
-                pe.q_ = pe.q_ + (q - pe.q_) / pe.n_update
+                # pe.q_ = pe.q_ + (q - pe.q_) / pe.n_update
             # logger.info('player:%s, value:%s, old v:%s, new v:%s', pe.upper_node.player, value, v0, pe.v)
 
     def add_edge(self, edge):
@@ -192,7 +229,7 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, board, player, policy_model, value_model, expansion_gate=50, lambda_=0.5, min_search=500, max_search=10000, min_search_time=15, max_search_time=300):
+    def __init__(self, player, init_board, first_player, policy_model, value_model, expansion_gate=50, lambda_=0.5, min_search=500, max_search=10000, min_search_time=15, max_search_time=300):
         self.player = player
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
@@ -217,7 +254,7 @@ class MCTS:
         self.opp_value_model.copy(value_model)
         logger.info('opp_value_model: %s', self.opp_value_model)
         self.opp_value_model_lock = threading.Lock()
-        self.root = Node(board, player, tree=self)
+        self.root = Node(init_board, first_player, tree=self)
         self.predicted = set()  # 树中已经走过的走法 (board_str, from, act)
         self.root.expansion()
         self.opp_actions = {}       # 对手走过的棋局, {board:{action:n}]
@@ -320,7 +357,7 @@ class MCTS:
                'root: \n%s'
         logger_tree.info(info, self.depth, self.n_node, self.root)
         for e in self.root.sub_edge:
-            logger_tree.info('edge:%s, v:%s, p:%s, N:%s, q:%s, q_:%s', e.a, e.v, e.p, e.n, e.q(), e.q_)
+            logger_tree.info('edge:%s, v:%s, p:%s, N:%s, q:%s', e.a, e.v, e.p, e.n, e.q())
             logger_tree.debug(e.down_node)
 
 
@@ -334,8 +371,9 @@ class COMMAND:
 
 
 class MCTSWorker:
-    def __init__(self, board, first_player, policy_model, value_model, predict_callback, min_search=500, max_search=10000, min_search_time=15, max_search_time=120, expansion_gate=50):
-        self.board = board
+    def __init__(self, player, init_board, first_player, policy_model, value_model, predict_callback, min_search=500, max_search=10000, min_search_time=15, max_search_time=120, expansion_gate=50):
+        self.player = player
+        self.init_board = init_board
         self.first_player = first_player
         self.policy_model = policy_model
         self.value_model = value_model
@@ -351,14 +389,18 @@ class MCTSWorker:
         self.opp_records = []   # 对手走棋记录
         self.records = []       # 走棋记录
         self.boards = set()     # 已经出现过的棋局: {(board,player)}
+        # self.boards.add((util.board_str(init_board), first_player))
+        self.started_event = Event()
 
     def start(self):
         Thread(target=self._start).start()
+        self.started_event.wait()
 
     def _start(self):
-        self.ts = MCTS(self.board, self.first_player, self.policy_model, self.value_model, lambda_=0, min_search=self.min_search, max_search=self.max_search,
+        self.ts = MCTS(self.player, self.init_board, self.first_player, self.policy_model, self.value_model, lambda_=0, min_search=self.min_search, max_search=self.max_search,
                        min_search_time=self.min_search_time, max_search_time=self.max_search_time, expansion_gate=self.expansion_gate)
         self.ts.show_info()
+        self.started_event.set()
         while True:
             command, board, player, action = self.command_queue.get()
             logger.info('\nget: %s, \n%s\n player:%s action:%s', command, board, player, action)
@@ -366,8 +408,10 @@ class MCTSWorker:
                 logger.info('MCTS WORKER ENDING...')
                 break
             if command == COMMAND.PREDICT:
+                self.train_circle(board, player)
                 board_str = util.board_str(board)
                 self.boards.add((board_str, player))
+                logger.info('(board_str, player):%s', (board_str, player))
                 # 走棋
                 logger.info('走棋......')
                 a, q = self.ts.predict(board, player)
@@ -379,22 +423,21 @@ class MCTSWorker:
                     self.predict_callback(None, None, None)
                 else:
                     self.predict_callback(a, q, opp_q)
-                    self.train_circle(board, a)
                     self.ts.search_forever()
             # elif command == COMMAND.MOVE_DOWN:
             #     # 对手走棋，向下移动树
             #     logger.info('move down...')
             #     self.ts.move_down(board, player, action)
             elif command == COMMAND.OPP_PLAY:
+                self.train_circle(board, player)
                 board_str = util.board_str(board)
-                self.boards.add(board_str, player)
+                self.boards.add((board_str, player))
+                logger.info('(board_str, player):%s', (board_str, player))
                 self.records.append((board.copy(), *action, 0.5, None))
                 # 将当前动作放进opp_actions里
                 if board_str not in self.ts.opp_actions:
                     self.ts.opp_actions[board_str] = {}
                 self.ts.opp_actions[board_str][action] = self.ts.opp_actions[board_str].get(action, 0) + 1
-
-                self.train_circle(board, action)
 
                 # Q值最大的边
                 max_e = max(self.ts.root.sub_edge, key=lambda e: e.v_)
@@ -411,30 +454,33 @@ class MCTSWorker:
                 self.ts.move_down(board, player, action)
             elif command == COMMAND.SEARCH:
                 self.ts.search_forever()
+            logger.info('records:%s', len(self.records))
         logger.info('...MCTS WORKER ENDED...')
 
-    def train_circle(self, board, action):
+    def train_circle(self, board, player):
         """
         检查棋局是否有环(棋局是否出现过)，如果有就将模型进行调整
         """
-        board = board.copy()
-        from_, act = action
-        rule.move_by_action(board, action)
-        if (util.board_str(board),board[from_]) in self.boards:
+        logger.info('(board_str, player):%s', (util.board_str(board),player))
+        if (util.board_str(board),player) in self.boards:
+            finded = False
             for i in range(len(self.records) - 1, -1, -1):
                 b, f, a, _, _ = self.records[i]
-                if (b == board).all() and (f, a) == action:
+                if (b == board).all() and b[f] == player:
+                    finded = True
                     break
+            assert finded, (board, player)
             circle = self.records[i:]
             with self.ts.value_model_lock:
                 self.ts.value_model.train(circle, epochs=3)
             with self.ts.opp_value_model_lock:
                 self.ts.opp_value_model.train(circle, epochs=3)
-
+            '''
             self.records = self.records[:i]
             for b, f, a, _, _ in circle:
                 self.boards.remove((util.board_str(b), b[f]))
-            logger.info('环:%s, records:%s', len(circle), len(self.records))
+            '''
+            logger.info('i:%s, 环:%s, records:%s', i, len(circle), len(self.records))
         return board
 
     def send(self, command, board=None, player=None, action=None):
@@ -447,6 +493,7 @@ class MCTSWorker:
         self.send(COMMAND.SEARCH)
 
     def stop_search(self):
+        self.started_event.wait()
         self.ts.stop_search()
 
     def move_down(self, action):
@@ -467,16 +514,18 @@ class MCTSProcess:
     该进程是非阻塞的，只是发送命令和接收结果
     具体搜索任务由另一个线程MCTSWorker完成
     """
-    def __init__(self, policy_model, value_model, init_board, first_player, player_val):
+    def __init__(self, policy_model, value_model, init_board, first_player, player):
         self.policy_model = policy_model
         self.value_model = value_model
-        self.player_val = player_val
+        self.init_board = init_board
+        self.first_player = first_player
+        self.player = player
         conn1, conn2 = Pipe()
         self.player_end = conn1
         self.mcts_end = conn2
         if first_player == -1:
             init_board = rule.flip_board(init_board)
-        self.worker = MCTSWorker(init_board, first_player, self.policy_model, self.value_model, self.predict_callback, min_search=500, min_search_time=10)
+        self.worker = MCTSWorker(player, init_board, first_player, self.policy_model, self.value_model, self.predict_callback, min_search=500, min_search_time=10)
         self.stopped = False
 
     def start(self):
@@ -490,6 +539,10 @@ class MCTSProcess:
         logger.info('start...')
 
         self.worker.start()
+
+        if self.first_player != self.player:
+            self.begin_search()
+
         while True:
             board, player, action = self.mcts_end.recv()
             logger.info('\nrecv: \n%s\n player:%s action:%s', board, player, action)

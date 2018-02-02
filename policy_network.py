@@ -284,6 +284,13 @@ class PolicyNetwork:
     def save_model(self, filepath):
         self.model.save(filepath)
 
+    @staticmethod
+    def close():
+        from keras import backend as K
+        if K.backend() == 'tensorflow':
+            import keras.backend.tensorflow_backend as tfb
+            tfb.clear_session()
+
 
 class RolloutPolicyNetwork(PolicyNetwork):
     @staticmethod

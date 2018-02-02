@@ -18,9 +18,6 @@ class NoActionException(BaseException):
 
 
 class ValueNetwork:
-    """
-    v = 1 if win else 0
-    """
     def __init__(self, epsilon=1.0, epsilon_decay=1e-5, hidden_activation='selu', output_activation='sigmoid', lr=1e-3, model=None, filepath=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
@@ -40,6 +37,7 @@ class ValueNetwork:
             self.model = model
         else:
             self.model = self.load_model(filepath) if filepath else self.create_model()
+        util.show_model(self.model)
 
     @staticmethod
     def load_model(model_file):
@@ -51,22 +49,24 @@ class ValueNetwork:
         for layer in model.layers:
             layer.kernel_regularizer = l2(l)
             layer.bias_regularizer = l2(l)
-        '''
+        
         l = 0.01
         out = model.get_layer(index=-1)
         out.kernel_regularizer = l2(l)
         out.bias_regularizer = l2(l)
+        '''
+        model.optimizer = SGD(lr=1e-5, decay=1e-6)
+        return model
 
+    @staticmethod
+    def show_model(model):
         for l in model.layers:
             if hasattr(l, 'kernel_regularizer'):
-                print('kernel_regularizer:', l.kernel_regularizer)
                 if l.kernel_regularizer:
                     print(l.kernel_regularizer.get_config())
-
-        # model.optimizer = SGD(lr=1e-4, decay=1e-6)
+                else:
+                    print('NO regularizer')
         print('optimizer:', model.optimizer.get_config())
-
-        return model
 
     def create_model(self):
         l = 1e-3
@@ -132,6 +132,7 @@ class ValueNetwork:
         # loss function
         loss = 'mse' # if self.output_activation == 'linear' else 'binary_crossentropy' if self.output_activation == 'sigmoid' else None
         model.compile(optimizer=opt, loss=loss)
+
         return model
 
     @staticmethod
@@ -186,6 +187,56 @@ class ValueNetwork:
             # 随机选择
             return self.random_choice(valid_action),q
 
+    def epsilon_greedy2(self, board, valid_action, qs):
+        """
+        使用epsilon-greedy策略选择下一步动作
+        以1-epsilon的概率选择最大Q值的动作
+        以epsilon的概率以epsilon-greedy的方式选择其它动作
+        :return: 下一个动作: (from,to)
+        """
+        if len(valid_action) == 1:
+            return valid_action[0], qs
+
+        if qs is None:
+            qs = [self.q(board, from_, action) for from_, action in valid_action]
+
+        max_idx = np.argmax(qs)
+
+        if np.random.random() > self.epsilon:
+            # 1-epsilon的概率选取Q值最大的
+            return valid_action[max_idx],qs
+        else:
+            # epsilon的概率选择其它动作
+            valid_action = valid_action[:max_idx] + valid_action[max_idx+1:]
+            qs = qs[:max_idx] + qs[max_idx+1:]
+            return self.epsilon_greedy2(board, valid_action, qs)
+
+    def epsilon_greedy_probs(self, board, valid_action, qs):
+        """
+        使用epsilon-greedy策略选择下一步动作
+        以1-epsilon的概率选择最大Q值的动作
+        以epsilon的概率按概率选择
+        :return: 下一个动作: (from,to)
+        """
+        if len(valid_action) == 1:
+            return valid_action[0], qs
+
+        if qs is None:
+            qs = [self.q(board, from_, action) for from_, action in valid_action]
+
+        max_idx = np.argmax(qs)
+
+        if np.random.random() > self.epsilon:
+            # 1-epsilon的概率选取Q值最大的
+            return valid_action[max_idx],qs
+        else:
+            # epsilon的概率按概率选择动作
+            probs = self.value_to_probs(qs)
+            action = util.select_by_prob(valid_action, probs)
+            if self.episode % 10 == 0:
+                logger.info('probs:%s', probs)
+            return action,qs
+
     def pi_star(self, valid_action, q):
         """
         选择Q值最大的动作，即最优策略
@@ -212,7 +263,7 @@ class ValueNetwork:
         if len(valid) == 0:
             raise NoActionException
         board_str = ''.join(map(str, board.flatten()))
-        (from_,action),q = self.epsilon_greedy(board, valid, q)
+        (from_,action),q = self.epsilon_greedy_probs(board, valid, q)
         self.predicts.add((board_str,from_,action))
         self.set_pre(q, valid, None)
         if self.episode % 10 == 0:
@@ -288,7 +339,7 @@ class ValueNetwork:
         return q2
 
     def decay_epsilon(self):
-        self.epsilon = self._epsilon / (1 + self.epsilon_decay * (1 + self.episode))
+        self.epsilon = self._epsilon / (1 + self.epsilon_decay * np.log(1 + self.episode))
 
     @staticmethod
     def random_choice(a):
@@ -312,6 +363,13 @@ class ValueNetwork:
     def save_model(self, filepath):
         self.model.save(filepath)
 
+    @staticmethod
+    def close():
+        from keras import backend as K
+        if K.backend() == 'tensorflow':
+            import keras.backend.tensorflow_backend as tfb
+            tfb.clear_session()
+
 
 # @print_use_time()
 def simulate(nw0, nw1, activation, init='fixed'):
@@ -320,6 +378,7 @@ def simulate(nw0, nw1, activation, init='fixed'):
     logger.info('init:%s, player:%s', init, player)
     board = rule.init_board(player) if init == 'fixed' else rule.random_init_board()
     records = Record()
+    # full_records = Record()
     boards = set()      # {(board,player)}
     nws = [None, nw0, nw1]
     n_steps = 0
@@ -333,7 +392,7 @@ def simulate(nw0, nw1, activation, init='fixed'):
                 # 找出环，并将目标置为0.5进行训练，然后将环清除
                 finded = False
                 records2 = Record()
-                for i in range(len(records) - 1, -1, -1):
+                for i in range(len(boards) - 1, -1, -1):
                     b, f, a, _, _ = records[i]
                     if (b == board).all() and b[f] == player:
                         finded = True
@@ -358,19 +417,22 @@ def simulate(nw0, nw1, activation, init='fixed'):
             reward = len(eat)
             if activation == 'sigmoid':
                 records.add3(bd, from_, action, reward, win=command==rule.WIN)
+                # full_records.add3(bd, from_, action, reward, win=command==rule.WIN)
             elif activation == 'linear':
                 records.add2(bd, from_, action, reward, win=command==rule.WIN)
+                # full_records.add2(bd, from_, action, reward, win=command == rule.WIN)
             elif activation == 'selu':
                 records.add4(bd, from_, action, reward, win=command==rule.WIN)
+                # full_records.add4(bd, from_, action, reward, win=command == rule.WIN)
             else:
                 raise ValueError
             if command == rule.WIN:
                 logging.info('%s WIN, stone:%s, step use: %s, epsilon:%s', str(player), (board==player).sum(), records.length(), nw.epsilon)
                 return records, player
-            if n_steps > 3000:
-                logging.info('走子数过多: %s', records.length())
+            if n_steps - records.length() > 500:
+                logging.info('循环走子数过多: %s', records.length())
                 # 走子数过多，和棋
-                records.draw()
+                records.clear()
                 return records, 0
 
             player = -player
@@ -415,29 +477,33 @@ def train():
     add_print_time_fun(['simulate', 'train_once'])
     hidden_activation = 'relu'
     activation = 'sigmoid' # linear, sigmoid
-    begin = 2610000
+    begin = 2630000
     n_ = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_fixed_%05dw.model' % np.ceil(begin / 10000))
-    n0 = ValueNetwork(epsilon=0, output_activation=activation, hidden_activation=hidden_activation)
-    n1 = ValueNetwork(epsilon=0, output_activation=activation, hidden_activation=hidden_activation)
+    n0 = ValueNetwork(epsilon=0.3, epsilon_decay=1e-4, output_activation=activation, hidden_activation=hidden_activation)
+    n1 = ValueNetwork(epsilon=0.3, epsilon_decay=1e-4, output_activation=activation, hidden_activation=hidden_activation)
     n0.copy(n_)
     n1.copy(n_)
 
     episode = 100000
-    '''
-    for i in range(begin+1, begin+episode+1):
+
+    for i in range(1, episode + 1):
         records = train_once(n0, n1, i, activation, init='random')
         if i % 1000 == 0:
             records.save('records/train/value_network/')
         if i % 1000 == 0:
-            n0.save_model('model/value_network/value_network_random_%05dw.model' % (np.ceil(i / 10000)))
-    '''
-    # n0._epsilon = n1._epsilon = 1
-    for i in range(begin+1, 4000000 + 1):
+            logger.info('model/value_network/value_network_random_%05dw.model' % (np.ceil((begin + i) / 10000)))
+            n0.save_model('model/value_network/value_network_random_%05dw.model' % (np.ceil((begin + i) / 10000)))
+
+    begin = begin+episode+1
+    n0.episode = 0.3
+    n1.episode = 0.3
+    for i in range(1, episode * 3 + 1):
         records = train_once(n0, n1, i, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:
             records.save('records/train/value_network/1st_')
         if i % 1000 == 0:
-            n0.save_model('model/value_network/value_network_fixed_%05dw.model' % (np.ceil(i / 10000)))
+            logger.info('model/value_network/value_network_fixed_%05dw.model' % (np.ceil((begin + i) / 10000)))
+            n0.save_model('model/value_network/value_network_fixed_%05dw.model' % (np.ceil((begin + i) / 10000)))
 
 
 if __name__ == '__main__':

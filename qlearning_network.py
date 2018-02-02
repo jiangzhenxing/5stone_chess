@@ -15,15 +15,13 @@ logger = logging.getLogger('train')
 
 
 class DQN(ValueNetwork):
-    """
-    q = 1 if win else 0
-    """
     @staticmethod
     def load_model(model_file):
         logger.info('load model in DQN')
         model = load_model(model_file)
 
         # 这里中途修改了一下输出层的正则化参数和SGD的学习率
+        '''
         l = 1e-3
         for layer in model.layers:
             layer.kernel_regularizer = l2(l)
@@ -33,16 +31,8 @@ class DQN(ValueNetwork):
         out = model.get_layer(index=-1)
         out.kernel_regularizer = l2(l)
         out.bias_regularizer = l2(l)
-
-        for l in model.layers:
-            if hasattr(l, 'kernel_regularizer'):
-                print('kernel_regularizer:', l.kernel_regularizer)
-                if l.kernel_regularizer:
-                    print(l.kernel_regularizer.get_config())
-
+        '''
         model.optimizer = SGD(lr=1e-3, decay=1e-5)
-        print('optimizer:', model.optimizer.get_config())
-
         return model
 
     def create_model(self):
@@ -149,27 +139,30 @@ def train():
     add_print_time_fun(['simulate', 'train_once'])
     hidden_activation = 'relu'
     activation = 'sigmoid'     # linear, selu, sigmoid
-    begin = 6300000
+    begin = 6390000
     model_file = 'model/qlearning_network/DQN_fixed_sigmoid_555_%05dw.model' % np.ceil(begin / 10000)
-    n_ = DQN(epsilon=0.5, epsilon_decay=1e-5, output_activation=activation, filepath=model_file)
-    n0 = DQN(epsilon=0.5, epsilon_decay=1e-5, output_activation=activation, hidden_activation=hidden_activation)
-    n1 = DQN(epsilon=0.5, epsilon_decay=1e-5, output_activation=activation, hidden_activation=hidden_activation)
+    n_ = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, filepath=model_file)
+    n0 = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, hidden_activation=hidden_activation)
+    n1 = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, hidden_activation=hidden_activation)
     n0.copy(n_)
     n1.copy(n_)
-    episode = 100000
+    episode = 300000
 
-    '''
-    for i in range(begin, begin+episode+1):
+    for i in range(1, episode+1):
         train_once(n0, n1, i, activation, init='random')
         if i % 1000 == 0:
-            n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, np.ceil(i / 10000)))
-    '''
-    for i in range(begin+1, begin + episode*10 + 1):
-        records = train_once(n0, n1, i-6000000, activation, init='fixed', copy_period=1)
+            n0.save_model('model/qlearning_network/DQN_random_%s_%05dw.model' % (activation, np.ceil((i+begin) / 10000)))
+
+    begin += episode
+    n0.episode = 1
+    n1.episode = 1
+    for i in range(1, episode*10 + 1):
+        records = train_once(n0, n1, i, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:
             records.save('records/train/qlearning_network/1st_')
         if i % 1000 == 0:
-            n0.save_model('model/qlearning_network/DQN_fixed_%s_555_%05dw.model' % (activation, np.ceil(i / 10000)))
+            logger.info('model/qlearning_network/DQN_fixed_%s_555_%05dw.model' % (activation, np.ceil((i+begin) / 10000)))
+            n0.save_model('model/qlearning_network/DQN_fixed_%s_555_%05dw.model' % (activation, np.ceil((i+begin) / 10000)))
 
 
 if __name__ == '__main__':

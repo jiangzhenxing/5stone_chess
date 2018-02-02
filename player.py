@@ -81,6 +81,10 @@ class ComputerPlayer(Player):
     def load_model(self):
         raise NotImplemented
 
+    def stop(self):
+        if self.model:
+            self.model.close()
+
 
 class PolicyNetworkPlayer(ComputerPlayer):
     def load_model(self):
