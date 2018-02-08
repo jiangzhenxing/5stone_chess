@@ -73,11 +73,16 @@ def rand_int32():
 
 def softmax(a):
     a = np.array(a)
+    m = a.max()
+    # 为防止np.e ** a计算溢出，置最大值为700
+    if m > 700:
+        a = a / (m / 700)
     ea = np.e ** a
     return ea / ea.sum()
 
 LOCAL = threading.local()
 def load_model(filepath):
+    logging.info('load model...')
     if not hasattr(LOCAL, 'models'):
         LOCAL.models = {}
     models = LOCAL.models
@@ -85,43 +90,44 @@ def load_model(filepath):
     if filepath in models:
         return models[filepath]
     else:
+        logging.info('load model2 ...')
         from keras.models import load_model
         model = load_model(filepath)
         models[filepath] = model
         return model
 
-def show_model(model, columns=('input_shape','output_shape','params','kernel_regularizer')):
+def show_model(model, columns=('name', 'input_shape','output_shape','activation', 'params','kernel_regularizer')):
     idx = 1
     rows = []
     total_params = 0
     for l in model.layers:
-        # config = l.get_config()
+        config = l.get_config()
+        # print(config)
         total_params += l.count_params()
-        values = [idx, type(l).__name__]
+        values = [idx]
         for col in columns:
             if col == 'params':
                 values.append(l.count_params())
-            elif hasattr(l, col):
-                value = getattr(l, col)
-                if not value:
-                    values.append('None')
+            elif col in config:
+                value = config[col]
+                if 'regularizer' in col:
+                    reg_config = value['config']
+                    reg_str = ''
+                    if reg_config['l1'] > 0:
+                        reg_str += 'l1:%g' % reg_config['l1'] + ','
+                    if reg_config['l2'] > 0:
+                        reg_str += 'l2:%g' % reg_config['l2'] + ','
+                    values.append(reg_str[:-1])
                 else:
-                    if 'regularizer' in col:
-                        reg_config = value.get_config()
-                        reg_str = ''
-                        if reg_config['l1'] > 0:
-                            reg_str += 'l1:%g' % reg_config['l1'] + ','
-                        if reg_config['l2'] > 0:
-                            reg_str += 'l2:%g' % reg_config['l2'] + ','
-                        values.append(reg_str[:-1])
-                    else:
-                        values.append(value)
+                    values.append(value)
+            elif hasattr(l, col):
+                values.append(getattr(l, col))
             else:
                 values.append('NotExist')
         rows.append([str(v).replace(' ','') for v in values])
         idx += 1
 
-    columns = ['#', 'Layer']+list(columns)
+    columns = ['#']+list(columns)
     widths = [[len(c) for c in columns]]
     for r in rows:
         widths.append([len(v) for v in r])

@@ -1,9 +1,5 @@
 import numpy as np
-from keras.models import Model, Sequential, load_model
-from keras.layers import Input, Dense, Convolution2D, Activation, Flatten
-from keras.optimizers import Adam, SGD
-from keras.regularizers import l2
-from keras.layers.merge import add
+
 import chess_rule as rule
 from util import add_print_time_fun, print_use_time
 from record import Record
@@ -18,7 +14,7 @@ class NoActionException(BaseException):
 
 
 class ValueNetwork:
-    def __init__(self, epsilon=1.0, epsilon_decay=1e-5, hidden_activation='selu', output_activation='sigmoid', lr=1e-3, model=None, filepath=None):
+    def __init__(self, epsilon=1.0, epsilon_decay=1e-5, hidden_activation='relu', output_activation='sigmoid', lr=1e-3, model=None, model_file=None, weights_file=None):
         self.output_activation = output_activation
         self.epsilon = epsilon
         self._epsilon = epsilon
@@ -26,7 +22,7 @@ class ValueNetwork:
         self.hidden_activation = hidden_activation
         self.output_activation = output_activation
         self.lr = lr
-        self.model_file = filepath
+        self.model_file = model_file
         self.predicts = set()
         # 跟踪上一步的值，供调试
         self.q_value = None
@@ -36,12 +32,16 @@ class ValueNetwork:
         if model:
             self.model = model
         else:
-            self.model = self.load_model(filepath) if filepath else self.create_model()
+            self.model = self.load_model(model_file) if model_file else self.create_model()
+        if weights_file:
+            logger.info('weights_file:%s', weights_file)
+            self.model.load_weights(weights_file)
         util.show_model(self.model)
 
     @staticmethod
     def load_model(model_file):
         logger.info('load model in ValueNetwork')
+        from keras.models import load_model
         model = load_model(model_file)
         '''
         # 这里中途修改了一下输出层的正则化参数和SGD的学习率
@@ -55,7 +55,7 @@ class ValueNetwork:
         out.kernel_regularizer = l2(l)
         out.bias_regularizer = l2(l)
         '''
-        model.optimizer = SGD(lr=1e-5, decay=1e-6)
+        # model.optimizer = SGD(lr=1e-5, decay=1e-6)
         return model
 
     @staticmethod
@@ -69,6 +69,12 @@ class ValueNetwork:
         print('optimizer:', model.optimizer.get_config())
 
     def create_model(self):
+        from keras.models import Model
+        from keras.layers import Input, Dense, Convolution2D, Activation, Flatten
+        from keras.optimizers import Adam, SGD
+        from keras.regularizers import l2
+        from keras.layers.merge import add
+
         l = 1e-3
 
         def identity_block(x, nb_filter, kernel_size=3):
@@ -253,8 +259,8 @@ class ValueNetwork:
         return self.pi_star(valid, q),(valid,q)
 
     def policy(self, board, player):
-        return self.policy_by_probs(board, player)
-        # return self.policy_by_epsilon_greedy(board, player)
+        # return self.policy_by_probs(board, player)
+        return self.policy_by_epsilon_greedy(board, player)
 
     def policy_by_epsilon_greedy(self, board, player):
         valid = rule.valid_actions(board, player)
@@ -369,6 +375,8 @@ class ValueNetwork:
         if K.backend() == 'tensorflow':
             import keras.backend.tensorflow_backend as tfb
             tfb.clear_session()
+            # tfb.get_session().close()
+            logger.info('tensorflow session clear')
 
 
 # @print_use_time()
@@ -477,10 +485,10 @@ def train():
     add_print_time_fun(['simulate', 'train_once'])
     hidden_activation = 'relu'
     activation = 'sigmoid' # linear, sigmoid
-    begin = 2630000
-    n_ = ValueNetwork(epsilon=0, output_activation=activation, filepath='model/value_network/value_network_fixed_%05dw.model' % np.ceil(begin / 10000))
-    n0 = ValueNetwork(epsilon=0.3, epsilon_decay=1e-4, output_activation=activation, hidden_activation=hidden_activation)
-    n1 = ValueNetwork(epsilon=0.3, epsilon_decay=1e-4, output_activation=activation, hidden_activation=hidden_activation)
+    begin = 2720000
+    n_ = ValueNetwork(epsilon=0, output_activation=activation, model_file='model/value_network/value_network_fixed_%05dw.model' % np.ceil(begin / 10000))
+    n0 = ValueNetwork(epsilon=1, epsilon_decay=0.2, output_activation=activation, hidden_activation=hidden_activation)
+    n1 = ValueNetwork(epsilon=1, epsilon_decay=0.2, output_activation=activation, hidden_activation=hidden_activation)
     n0.copy(n_)
     n1.copy(n_)
 
@@ -495,8 +503,8 @@ def train():
             n0.save_model('model/value_network/value_network_random_%05dw.model' % (np.ceil((begin + i) / 10000)))
 
     begin = begin+episode+1
-    n0.episode = 0.3
-    n1.episode = 0.3
+    n0.episode = 1
+    n1.episode = 1
     for i in range(1, episode * 3 + 1):
         records = train_once(n0, n1, i, activation, init='fixed', copy_period=1)
         if i % 1000 == 0:

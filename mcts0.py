@@ -9,13 +9,18 @@ import threading
 from threading import Thread,Event
 from multiprocessing import Process,Pipe
 from queue import Queue
-from policy_network import PolicyNetwork
 from qlearning_network import DQN
 from value_network import ValueNetwork
 
 logger = logging.getLogger('train')
 logger_tree = logging.getLogger('tree')
 sys.setrecursionlimit(10000) # 最大递归深度设置为一万
+
+
+class Scene:
+    TRAIN = 'TRAIN'
+    PLAY = 'PLAY'
+
 
 class Node:
     def __init__(self, board, player, tree, level=1, parent_edge=None, expanded=False, final=False, value_decay=1):
@@ -83,13 +88,26 @@ class Node:
         以epsilon的概率选择之前走的走法
         1-epsilon的概率选Q值最大的走法
         """
-        if self.player == self.tree.player:
-            # 选Q值最大的走法
-            return self.selection_by_Q(walked)
-        else:
-            # 以epsilon的概率选择之前走的走法
-            # 1-epsilon的概率选Q值最大的走法
-            return self.selection_epsilon(walked)
+        if self.tree.scene == Scene.PLAY:
+            if self.player == self.tree.player:
+                # 选Q值最大的走法
+                return self.selection_by_Q(walked)
+            else:
+                # 以epsilon的概率选择之前走的走法
+                # 1-epsilon的概率选Q值最大的走法
+                return self.selection_epsilon(walked)
+        elif self.tree.scene == Scene.TRAIN:
+            # 训练时按概率走棋
+            return self.selection_by_probs()
+
+    def selection_by_probs(self):
+        """
+        在训练的时候
+        以softmax(N ** 1/t)的概率选择走法
+        """
+        N = [e.n ** (1/self.tree.t) for e in self.sub_edge]
+        probs = util.softmax(N)
+        return util.select_by_prob(self.sub_edge, probs)
 
     def selection_by_Q(self, walked):
         """
@@ -142,6 +160,7 @@ class Node:
         else:
             with self.tree.opp_value_model_lock:
                 values = [self.tree.opp_value_model.q(board, from_, act) for from_, act in actions]
+
         probs = ValueNetwork.value_to_probs(values)
         for a,v,p in zip(actions, values, probs):
             e = Edge(upper_node=self, a=a, v=v, p=p, lambda_=self.tree.lambda_)
@@ -229,7 +248,9 @@ class MCTS:
     蒙特卡罗树搜索
     a = argmaxQ
     """
-    def __init__(self, player, init_board, first_player, policy_model, value_model, expansion_gate=50, lambda_=0.5, min_search=500, max_search=10000, min_search_time=15, max_search_time=300):
+    def __init__(self, player, init_board, first_player, policy_model, value_model,
+                 expansion_gate=50, lambda_=0.5, min_search=500, max_search=10000,
+                 min_search_time=15, max_search_time=300, scene=Scene.PLAY, t=100, t_decay = 0.0002):
         self.player = player
         self.expansion_gate = expansion_gate
         self.lambda_ = lambda_
@@ -243,14 +264,20 @@ class MCTS:
         self.depth = 0
         self.n_node = 0
         self.n_search = 0
+        self.scene = scene
+        self.t = t                              # 训练的温度，逐渐减小，用以控制概率
+        self._t = t
+        self.t_decay = t_decay
+
         logger.info('value_model: %s', value_model)
         if isinstance(value_model, str):
-            value_model = DQN.load(value_model) if 'DQN' in value_model else ValueNetwork.load(value_model)
+            value_model = DQN(hidden_activation='relu',lr=0.001, weights_file=value_model) if 'DQN' in value_model else ValueNetwork(hidden_activation='relu',lr=0.001, weights_file=value_model)
         # self.policy = value_model
+        logger.info('value_model: %s', value_model)
         self.value_model = value_model
         self.value_model_lock = threading.Lock()
         # 模拟对手走棋时用的Q值由opp_value预测，走棋的同时学习对手走棋的习惯
-        self.opp_value_model = type(value_model)(hidden_activation='relu',lr=0.002)
+        self.opp_value_model = type(value_model)(hidden_activation='relu',lr=0.001)
         self.opp_value_model.copy(value_model)
         logger.info('opp_value_model: %s', self.opp_value_model)
         self.opp_value_model_lock = threading.Lock()
@@ -351,6 +378,9 @@ class MCTS:
         self.stop = False
         self.n_search = 0
 
+    def decay_t(self, episode):
+        return self._t / (1 + self.t_decay * episode)
+
     def show_info(self):
         info = '\n------------- tree info --------------\n' \
                'depth:%s, n_node:%s\n' \
@@ -405,6 +435,9 @@ class MCTSWorker:
             command, board, player, action = self.command_queue.get()
             logger.info('\nget: %s, \n%s\n player:%s action:%s', command, board, player, action)
             if command == COMMAND.STOP:
+                # if K.backend() == 'tensorflow':
+                #     import keras.backend.tensorflow_backend as tfb
+                #     tfb.clear_session()
                 logger.info('MCTS WORKER ENDING...')
                 break
             if command == COMMAND.PREDICT:
@@ -504,8 +537,8 @@ class MCTSWorker:
 
     def stop(self):
         self.stopped = True
-        self.send(COMMAND.STOP)
         self.stop_search()
+        self.send(COMMAND.STOP)
 
 
 class MCTSProcess:
@@ -529,7 +562,9 @@ class MCTSProcess:
         self.stopped = False
 
     def start(self):
-        Process(target=self._start).start()
+        p = Process(target=self._start)
+        p.daemon = True
+        p.start()
         self.stopped = False
 
     def predict_callback(self, a, q, opp_q):
@@ -537,7 +572,6 @@ class MCTSProcess:
 
     def _start(self):
         logger.info('start...')
-
         self.worker.start()
 
         if self.first_player != self.player:
@@ -609,7 +643,8 @@ class SimulateProcess:
             # value_model_params = self.model_queue.get()
             with self.weight_lock:
                 value_model.model.load_weights(self.weights_file)
-            ts = MCTS(board=board.copy(), player=player, policy_model=None, value_model=value_model, max_search=50, min_search_time=0)
+            ts = MCTS(init_board=board.copy(), player=player, policy_model=None, value_model=value_model, max_search=50, min_search_time=0, scene=Scene.TRAIN)
+            ts.decay_t(episode=i)
             records, winner = self.simulate(ts, board, player)
             if records.length() == 0:
                 continue
@@ -692,8 +727,8 @@ def train():
     weights_file = 'model/alpha0/weights'
     model_file = 'model/alpha0/value_network_00067h.model'
     begin = 6700
-    _value_model = ValueNetwork(output_activation='sigmoid', filepath=model_file)
-    value_model = ValueNetwork(output_activation='sigmoid')
+    _value_model = ValueNetwork(hidden_activation='selu', output_activation='sigmoid', model_file=model_file)
+    value_model = ValueNetwork(hidden_activation='selu', output_activation='sigmoid')
     value_model.copy(_value_model)
 
     if os.path.exists(weights_file):

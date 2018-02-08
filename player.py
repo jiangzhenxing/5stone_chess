@@ -72,10 +72,12 @@ class HummaPlayer(Player):
 
 
 class ComputerPlayer(Player):
-    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, modelfile, init_board, first_player):
+    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, init_board, first_player, hidden_activation='relu', modelfile=None, weights_file=None):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player, type_=COMPUTER)
         self.play_func = play_func
+        self.hidden_activation = hidden_activation
         self.modelfile = modelfile
+        self.weights_file = weights_file
         self.model = self.load_model()
 
     def load_model(self):
@@ -124,7 +126,7 @@ class PolicyNetworkPlayer(ComputerPlayer):
 
 class DQNPlayer(ComputerPlayer):
     def load_model(self):
-        return DQN.load(self.modelfile)
+        return DQN(weights_file=self.modelfile)
 
     def play0(self, board):
         logger.info('%s play...', self.name)
@@ -169,7 +171,7 @@ class DQNPlayer(ComputerPlayer):
 
 class ValuePlayer(DQNPlayer):
     def load_model(self):
-        return ValueNetwork.load(self.modelfile)
+        return ValueNetwork(hidden_activation=self.hidden_activation, output_activation='sigmoid', weights_file=self.weights_file)
 
 
 class MCTSPlayer(ComputerPlayer):

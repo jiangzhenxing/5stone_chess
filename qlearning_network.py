@@ -1,8 +1,5 @@
 import numpy as np
-from keras.models import Sequential, load_model
-from keras.layers import Dense,Convolution2D,Flatten
-from keras.optimizers import Adam, SGD
-from keras.regularizers import l2
+
 import chess_rule as rule
 from util import add_print_time_fun, print_use_time
 from record import Record
@@ -17,6 +14,10 @@ logger = logging.getLogger('train')
 class DQN(ValueNetwork):
     @staticmethod
     def load_model(model_file):
+        from keras.models import load_model
+        from keras.optimizers import Adam, SGD
+        from keras.regularizers import l2
+
         logger.info('load model in DQN')
         model = load_model(model_file)
 
@@ -36,6 +37,11 @@ class DQN(ValueNetwork):
         return model
 
     def create_model(self):
+        from keras.models import Sequential, load_model
+        from keras.layers import Dense, Convolution2D, Flatten
+        from keras.optimizers import Adam, SGD
+        from keras.regularizers import l2
+
         # 定义顺序模型
         model = Sequential()
         l = 1e-3
@@ -141,7 +147,7 @@ def train():
     activation = 'sigmoid'     # linear, selu, sigmoid
     begin = 6390000
     model_file = 'model/qlearning_network/DQN_fixed_sigmoid_555_%05dw.model' % np.ceil(begin / 10000)
-    n_ = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, filepath=model_file)
+    n_ = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, model_file=model_file)
     n0 = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, hidden_activation=hidden_activation)
     n1 = DQN(epsilon=1, epsilon_decay=0.2, output_activation=activation, hidden_activation=hidden_activation)
     n0.copy(n_)
