@@ -678,9 +678,9 @@ class SimulateProcess:
                 valid_action = rule.valid_actions(board, player)
                 while True:
                     (from_, act), q = self.epsilon_greedy(board, player, valid_action, ts)
-                    if (board_str,from_, act) not in self.predicts:
+                    if (board_str,from_, act) not in self.predicts or len(ts.root.sub_edge) == 1:
                         break
-                    ts.root.sub_edge = list(filter(lambda e: e.a != (from_,act), ts.root.sub_edge))
+                    ts.root.sub_edge = [e for e in ts.root.sub_edge if e.a != (from_,act)]
                     valid_action.remove((from_,act))
                 assert board[from_] == player
                 ts.move_down(board, player, action=(from_, act))
