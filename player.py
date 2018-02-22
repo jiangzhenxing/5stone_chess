@@ -5,7 +5,7 @@ from threading import Thread
 from policy_network import PolicyNetwork
 from qlearning_network import DQN
 from value_network import ValueNetwork
-from mcts0 import MCTSProcess
+from mcts0 import MCTSWorker
 import chess_rule as rule
 
 
@@ -87,10 +87,20 @@ class ComputerPlayer(Player):
     def start(self, init_board, first_player):
         self.play_process = PlayProcess(model_fuc=self.load_model)
         self.play_process.start()
+        self.stopped = False
 
     def stop(self):
         self.play_process.stop()
         self.stopped = True
+
+
+class COMMAND:
+    SEARCH = 'SEARCH'
+    MOVE_DOWN = 'MOVE_DOWN'
+    PREDICT = 'PREDICT'
+    STOP = 'STOP'
+    STOP_SEARCH = 'STOP_SEARCH'
+    OPP_PLAY = 'OPP_PLAY'
 
 
 class PlayProcess:
@@ -99,29 +109,33 @@ class PlayProcess:
         conn1, conn2 = Pipe()
         self.player_end = conn1
         self.process_end = conn2
+        self.stopped = False
 
     def start(self):
         p = Process(target=self._start)
         p.daemon = True
         p.start()
+        self.stopped = False
 
     def _start(self):
         model = self.model_fuc()
         while True:
-            board,stone_val = self.process_end.recv()
-            if board is None:
+            command, args = self.process_end.recv()
+            if command == COMMAND.STOP:
                 model.close()
                 self.process_end.send(0)
                 break
-            self.process_end.send(model.predict(board, stone_val))
+            elif command == COMMAND.PREDICT:
+                board, stone_val = args
+                self.process_end.send(model.predict(board, stone_val))
 
     def predict(self, board, stone_val):
-        self.player_end.send((board.copy(), stone_val))
+        self.player_end.send((COMMAND.PREDICT, (board.copy(), stone_val)))
         return self.player_end.recv()
 
     def stop(self):
-        self.player_end.send((None, 0))
-        self.player_end.recv()
+        self.player_end.send((COMMAND.STOP, None))
+        # self.player_end.recv()
 
 
 class PolicyNetworkPlayer(ComputerPlayer):
@@ -264,3 +278,58 @@ class MCTSPlayer(ComputerPlayer):
     def stop(self):
         self.play_process.stop()
         self.stopped = True
+
+
+class MCTSProcess(PlayProcess):
+    """
+    MCTS进程
+    该进程是非阻塞的，只是发送命令和接收结果
+    具体搜索任务由另一个线程MCTSWorker完成
+    """
+    def __init__(self, policy_model, value_model, init_board, first_player, player):
+        PlayProcess.__init__(self, model_fuc=None)
+        self.policy_model = policy_model
+        self.value_model = value_model
+        self.first_player = first_player
+        self.player = player
+        if first_player == -1:
+            init_board = rule.flip_board(init_board)
+        self.init_board = init_board
+
+    def _start(self):
+        logger.info('start...')
+        worker = MCTSWorker(self.player, self.init_board, self.first_player, self.policy_model, self.value_model,
+                            predict_callback=lambda a, q, opp_q: self.process_end.send((a, q, opp_q)), min_search=500, min_search_time=10)
+        worker.start()
+
+        if self.first_player != self.player:
+            worker.begin_search()
+
+        while True:
+            command, args = self.process_end.recv()
+            logger.info('command:%s, args:\n%s', command, args)
+            if command == COMMAND.STOP:
+                worker.stop()
+                self.process_end.send(0)
+                break
+            elif command == COMMAND.PREDICT:
+                # 走棋
+                board, player = args
+                worker.predict(board, player)
+            elif command == COMMAND.OPP_PLAY:
+                # 对手走棋，先停止搜索，然后沿对手走棋的方向向下移动树
+                board, player, action = args
+                logger.info('对手走棋:%s stop search', action)
+                worker.stop_search()
+                # 将对手走的棋进行训练
+                worker.opp_play(board, player, action)
+                # logger.info('move down along %s', action)
+                # self.worker.move_down(action)
+
+        logger.info('...MCTS PROCESS ENDED...')
+
+    def opponent_play(self, board, player, action):
+        """
+        对手走完棋:action,搜索树需要沿对手走棋的方向移动树的根结点
+        """
+        self.player_end.send((COMMAND.OPP_PLAY, (board, player, action)))
