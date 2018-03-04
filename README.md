@@ -6,4 +6,4 @@
 
 帮助信息请点击"help"按扭查看。
 
-示例请见records/demo/中的棋谱。
+示例棋谱请见records/demo/。
