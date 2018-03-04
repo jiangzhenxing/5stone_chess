@@ -1,3 +1,17 @@
+"""
+一个类似于alpha zero的实现。
+
+alpha zero的论文请见:
+
+https://www.nature.com/articles/nature24270.epdf?author_access_token=VJXbVjaSHxFoctQQ4p2k4tRgN0jAjWel9jnR3ZoTv0PVW4gB86EEpGqTRDtpIz-2rmo8-KG06gqVobU5NSCFeHILHcVFUeMsbvwS-lxjqQGg98faovwjxeTUgZAUMnRQ
+
+或：https://pan.baidu.com/s/1gfQ55Cn
+
+与alpha zero不同之处：
+
+神经网络模型不输出价值和概率，而是输出Q值，概率由Q值导出。
+"""
+
 import numpy as np
 import time
 import os
@@ -11,6 +25,7 @@ from multiprocessing import Process,Pipe
 from queue import Queue
 from qlearning_network import DQN
 from value_network import ValueNetwork
+
 
 logger = logging.getLogger('train')
 logger_tree = logging.getLogger('tree')

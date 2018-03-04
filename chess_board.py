@@ -1,10 +1,14 @@
+"""
+五子棋的UI界面
+使用帮助信息可以点击"help"按扭查看
+"""
 import tkinter as tk
 import numpy as np
 import time
 import threading
 import chess_rule as rule
 from tkinter import font,messagebox,filedialog,ttk
-from player import HummaPlayer, PolicyNetworkPlayer, DQNPlayer, ValuePlayer, MCTSPlayer
+from player import HummanPlayer, PolicyNetworkPlayer, DQNPlayer, ValuePlayer, MCTSPlayer
 from record import Record
 from init_boards import init_boards
 import logging
@@ -71,10 +75,10 @@ class ChessBoard:
         # 对手选择
         tk.Label(window, text='对手:').place(x=10, y=620)
         player_var = tk.StringVar()
-        player_classes = [('White(HummaPlayer)', HummaPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
-                          # ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'modelfile':'model/policy_network/convolution_0130w.model'}),
+        player_classes = [('White(HummanPlayer)', HummanPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
+                          # ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'model_file':'model/policy_network/convolution_0130w.model'}),
                           ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'weights_file':'model/qlearning_network/DQN_fixed_sigmoid_555_00605w.weights'}),   # DQN_fixed_sigmoid_00029w.model
-                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'weights_file':'model/value_network/value_network_fixed_00276w.weights'}),
+                          ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'weights_file':'model/value_network/value_network_sigmoid_00074w.weights'}), # 'weights_file':'model/value_network/value_network_sigmoid_00126w.weights',
                           ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/value_network/value_network_fixed_00276w.weights'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
@@ -179,10 +183,7 @@ class ChessBoard:
         player_name = self.player_var.get()
         player_class, p, kp = self.player_map[player_name]
         white_player = player_class(*p, init_board=init_board, first_player=first_player, **kp)
-        # white_player = PolicyNetworkPlayer('Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/policy_network/convolution_6000.model')
-        # white_player = DQNPlayer('Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/qlearning_network/DQN_dr_3000.model')
-        # white_player = MCTSPlayer('Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white, play_func=self._play, modelfile='model/DQN_0090.model', )
-        black_player = HummaPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, init_board=init_board, first_player=first_player)
+        black_player = HummanPlayer('Jhon', BLACK_VALUE, self.sig_black, self.winner_black, self.clock_black, init_board=init_board, first_player=first_player)
         self.players[WHITE_VALUE] = white_player
         self.players[BLACK_VALUE] = black_player
         for stone in self.stones:

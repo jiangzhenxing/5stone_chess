@@ -31,11 +31,14 @@ class ValueNetwork:
         self.episode = 0 # 第几次训练
         if model:
             self.model = model
+        elif model_file:
+            logger.info('load model from: %s', model_file)
+            self.model = self.load_model(model_file)
         else:
-            self.model = self.load_model(model_file) if model_file else self.create_model()
-        if weights_file:
-            logger.info('weights_file:%s', weights_file)
-            self.model.load_weights(weights_file)
+            self.model = self.create_model()
+            if weights_file:
+                logger.info('load model weights: %s', weights_file)
+                self.model.load_weights(weights_file)
         util.show_model(self.model)
 
     @staticmethod

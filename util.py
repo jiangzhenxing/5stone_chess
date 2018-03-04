@@ -110,6 +110,9 @@ def show_model(model, columns=('name', 'input_shape','output_shape','activation'
                 values.append(l.count_params())
             elif col in config:
                 value = config[col]
+                if value is None:
+                    values.append(None)
+                    continue
                 if 'regularizer' in col:
                     reg_config = value['config']
                     reg_str = ''

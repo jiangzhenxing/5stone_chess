@@ -66,17 +66,17 @@ class Player:
         return str(self)
 
 
-class HummaPlayer(Player):
+class HummanPlayer(Player):
     def __init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, init_board=init_board, first_player=first_player, type_=HUMMAN)
 
 
 class ComputerPlayer(Player):
-    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, init_board, first_player, hidden_activation='relu', modelfile=None, weights_file=None):
+    def __init__(self, name, stone_val, signal, winner_text, clock, play_func, init_board, first_player, hidden_activation='relu', model_file=None, weights_file=None):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player, type_=COMPUTER)
         self.play_func = play_func
         self.hidden_activation = hidden_activation
-        self.modelfile = modelfile
+        self.model_file = model_file
         self.weights_file = weights_file
         # self.model = self.load_model()
         self.play_process = None
@@ -119,6 +119,7 @@ class PlayProcess:
 
     def _start(self):
         model = self.model_fuc()
+
         while True:
             command, args = self.process_end.recv()
             if command == COMMAND.STOP:
@@ -140,7 +141,7 @@ class PlayProcess:
 
 class PolicyNetworkPlayer(ComputerPlayer):
     def load_model(self):
-        return PolicyNetwork.load(self.modelfile)
+        return PolicyNetwork.load(self.model_file)
 
     def play0(self, board):
         logger.info('%s play...', self.name)
@@ -176,7 +177,7 @@ class PolicyNetworkPlayer(ComputerPlayer):
 
 class DQNPlayer(ComputerPlayer):
     def load_model(self):
-        return DQN(weights_file=self.weights_file)
+        return DQN(model_file=self.model_file, weights_file=self.weights_file)
 
     def play(self, board):
         logger.info('%s play...', self.name)
@@ -213,7 +214,7 @@ class DQNPlayer(ComputerPlayer):
 
 class ValuePlayer(DQNPlayer):
     def load_model(self):
-        return ValueNetwork(hidden_activation=self.hidden_activation, output_activation='sigmoid', weights_file=self.weights_file)
+        return ValueNetwork(hidden_activation=self.hidden_activation, output_activation='sigmoid', model_file=self.model_file, weights_file=self.weights_file)
 
 
 class MCTSPlayer(ComputerPlayer):
@@ -314,6 +315,7 @@ class MCTSProcess(PlayProcess):
                 break
             elif command == COMMAND.PREDICT:
                 # 走棋
+                worker.stop_search()
                 board, player = args
                 worker.predict(board, player)
             elif command == COMMAND.OPP_PLAY:
