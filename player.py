@@ -31,9 +31,8 @@ class Player:
     def play(self, board):
         """
         返回(位置,动作)
-        人类选手由界面操作，所以不执行任何动作
         """
-        pass
+        raise NotImplementedError
 
     def opponent_play(self, board, from_, to_):
         """
@@ -69,6 +68,13 @@ class Player:
 class HummanPlayer(Player):
     def __init__(self, name, stone_val, signal, winner_text, clock, init_board, first_player):
         Player.__init__(self, name, stone_val, signal, winner_text, clock, init_board=init_board, first_player=first_player, type_=HUMMAN)
+
+    def play(self, board):
+        """
+        返回(位置,动作)
+        人类选手由界面操作，所以不执行任何动作
+        """
+        pass
 
 
 class ComputerPlayer(Player):

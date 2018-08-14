@@ -299,7 +299,7 @@ class ValueNetwork:
                     logger.info('q:%s', q)
                 return from_,action
             else:
-                # 将已经走过的位置移除，不再选择
+                # 将已经走过的位置移除，选择其它位置
                 idx = valid.index((from_,action))
                 valid.pop(idx)
                 if q:

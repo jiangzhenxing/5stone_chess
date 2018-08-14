@@ -22,12 +22,13 @@ WHITE_VALUE = -1
 
 
 class Stone:
-    def __init__(self, loc, oval, value, player=None):
+    def __init__(self, loc, oval, value, text, player=None):
         self.loc = loc
         self.oval = oval
+        self.text= text
         self.value = value
         self.player = player
-Stone.NONE = Stone(None,None,None)
+Stone.NONE = Stone(None,None,None,None)
 
 
 class ChessBoard:
@@ -58,7 +59,7 @@ class ChessBoard:
         self.name_white = canvas.create_text(40, 30, text=WHITE, fill='#EEE', font=font.Font(size=20))
         self.name_black = canvas.create_text(40, w*6-30, text=BLACK, fill='#111', font=font.Font(size=20))
 
-        # 指示当前棋手信号灯
+        # 指示当前棋手的信号灯
         sig_r = 5
         self.sig_white = canvas.create_oval(82-sig_r, 30-sig_r, 82 + sig_r, 30 + sig_r, fill='#66FF66', outline='#66FF66', state=tk.HIDDEN)
         self.sig_black = canvas.create_oval(82 - sig_r, w*6 - (30 - sig_r), 82 + sig_r, w*6 - (30 + sig_r), fill='#66FF66', outline='#66FF66', state=tk.HIDDEN)
@@ -77,9 +78,9 @@ class ChessBoard:
         player_var = tk.StringVar()
         player_classes = [('White(HummanPlayer)', HummanPlayer,('White', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white), {}),
                           # ('Paul(PolicyPlayer)', PolicyNetworkPlayer, ['Paul', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'model_file':'model/policy_network/convolution_0130w.model'}),
-                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'weights_file':'model/qlearning_network/DQN_fixed_sigmoid_555_00605w.weights'}),
+                          ('Quin(DQNPlayer)', DQNPlayer, ['Quin', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'weights_file':'model/qlearning_network/DQN_fixed_sigmoid_00029w.weights'}),
                           ('Vance(ValuePlayer)', ValuePlayer, ['Vance', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'weights_file':'model/value_network/value_network_sigmoid_00074w.weights'}),
-                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/qlearning_network/DQN_fixed_sigmoid_555_00605w.weights'}),]
+                          ('Toms(MCTSPlayer)', MCTSPlayer, ['Toms', WHITE_VALUE, self.sig_white, self.winner_white, self.clock_white], {'play_func':self._play, 'policy_model':'', 'value_model':'model/qlearning_network/DQN_fixed_sigmoid_00029w.weights'}),]
         self.player_map = {n:(c, p, kp) for n, c, p, kp in player_classes}
         players = [n for n, *_ in player_classes]
         player_choosen = ttk.Combobox(window, width=16, textvariable=player_var, values=players, state='readonly')
@@ -107,16 +108,16 @@ class ChessBoard:
 
         # 开始按扭
         start_btn_text = tk.StringVar(window, value='start')
-        tk.Button(window, textvariable=start_btn_text, command=self.start, width=3).place(x=425, y=617)
+        tk.Button(window, textvariable=start_btn_text, command=self.start, width=5).place(x=425, y=617)
 
         # 隐藏路径按扭
         hide_q_str = tk.StringVar(value='hideQ')
-        tk.Button(window, textvariable=hide_q_str, command=self.hide_q, width=4).place(x=483, y=617)
+        tk.Button(window, textvariable=hide_q_str, command=self.hide_q, width=5).place(x=483, y=617)
         self.hide_q_str = hide_q_str
         self.print_q_flag = True
 
         # 帮助按扭
-        tk.Button(window, text='help', command=self.help, width=2).place(x=548, y=617)
+        tk.Button(window, text='help', command=self.help, width=4).place(x=548, y=617)
 
         # ---------------- 第二排按扭 ------------------------------------------
         # 选择棋谱
@@ -135,7 +136,7 @@ class ChessBoard:
 
         # 暂停按扭
         pause_text = tk.StringVar(value='pause')
-        tk.Button(window, textvariable=pause_text, command=self.pause, width=5).place(x=510, y=655)
+        tk.Button(window, textvariable=pause_text, command=self.pause, width=6).place(x=510, y=655)
 
         # ---------------- 第三排按扭 ------------------------------------------
         # 消息显示
@@ -210,7 +211,7 @@ class ChessBoard:
 
     def play(self):
         logger.info('%s play...', self.current_player)
-        if self.current_player.is_humman():
+        # if self.current_player.is_humman():
             # 对手预测走棋
             # bd = self.board()
             # pl = self.current_player.stone_val
@@ -218,7 +219,7 @@ class ChessBoard:
             # if op is not None:
             #     valid = rule.valid_action(bd, pl)
             #     self.show_qtext(op, valid, hide=False)
-            return
+            # return
         board = self.board()
         self.current_player.play(board)
 
@@ -249,10 +250,14 @@ class ChessBoard:
         if board is None:
             board = init_boards[0]
         board = np.array(board)
+        n = 1
         for i,j in np.argwhere(board == WHITE_VALUE):
-            self.create_stone(i, j, WHITE_VALUE)
+            self.create_stone(i, j, WHITE_VALUE, text=str(n))
+            n += 1
+        n = 1
         for i, j in np.argwhere(board == BLACK_VALUE):
-            self.create_stone(i, j, BLACK_VALUE)
+            self.create_stone(i, j, BLACK_VALUE, text=str(n))
+            n += 1
 
     def onmotion(self, event):
         # self.show_message('position is (%d,%d)' % (event.x, event.y))
@@ -382,6 +387,7 @@ class ChessBoard:
 
     def del_stone(self, stone):
         self.canvas.delete(stone.oval)
+        self.canvas.delete(stone.text)
         self.stone(stone.loc, None)
 
     def switch_player(self):
@@ -403,6 +409,7 @@ class ChessBoard:
 
     def move_to_pos(self, stone, x, y):
         self.canvas.coords(stone.oval, x - self.r, y - self.r, x + self.r, y + self.r)
+        self.canvas.coords(stone.text, x, y)
 
     def opponent(self, player=None):
         if player is None:
@@ -417,12 +424,15 @@ class ChessBoard:
                 value.loc = loc
         return self._board[i][j]
 
-    def create_stone(self, i, j, value):
+    def create_stone(self, i, j, value, text=''):
         w, r = self.w, self.r
         color = '#EEE' if value == WHITE_VALUE else '#111'
-        s = Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill=color, outline=color), value=value)
+        text_color = '#111' if value == WHITE_VALUE else '#EEE'
+        s = Stone((i, j), self.create_oval(w * (j + 1), w * (i + 1), r, fill=color, outline=color), value=value,
+                  text=self.canvas.create_text(w * (j + 1), w * (i + 1), text=text, fill=text_color, font=font.Font(size=24, weight='bold')))
         self.stone((i, j), value=s)
         self.stones.append(s)
+
     def pos_to_loc(self, x, y):
         i = int(y / self.w - 0.5)
         j = int(x / self.w - 0.5)
