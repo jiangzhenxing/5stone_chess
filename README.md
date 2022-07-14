@@ -18,4 +18,3 @@ python chess_app.py
 注意：  
 本程序界面是在 Mac OS 系统下做的，在 Windows 系统下可能会错乱，有能力的同学请自行调整一下界面布局。
 界面布局代码主要在 chess_board.py 的 \_\_init\_\_ 方法中。  
-
